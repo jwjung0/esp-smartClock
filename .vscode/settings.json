@@ -1,0 +1,7 @@
+{
+  // ESP32 Arduino IntelliSense often false-positives under host Clang.
+  // Real errors come from PlatformIO build/flash, not editor squiggles.
+  "clangd.enable": false,
+  "C_Cpp.errorSquiggles": "disabled",
+  "C_Cpp.intelliSenseEngine": "default"
+}
