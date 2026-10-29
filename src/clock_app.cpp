@@ -4,6 +4,8 @@
 
 #if defined(FIRMWARE_MODE_APP)
 
+#include "bme_sensor.h"
+#include "data_ingest.h"
 #include "loading_gif.h"
 #include "time_sync.h"
 #include "wifi_config.h"
@@ -203,6 +205,9 @@ void clockAppSetup() {
   if (bootConfigOpen)
     Serial.println("Boot config window: 10 min (then WiFi off)");
 
+  bmeSensorBegin();
+  dataIngestBegin();
+
   showHome();
   Serial.println("Home screen");
 }
@@ -215,6 +220,8 @@ void clockAppLoop() {
   } else if ((int32_t)(millis() - nextNtpSyncMs) >= 0) {
     runDailyNtpSync();
   }
+
+  dataIngestLoop(!bootConfigOpen);
 
   if (wifiConfigTakeColorsChanged())
     applyClockColors();
