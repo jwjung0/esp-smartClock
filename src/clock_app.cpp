@@ -340,7 +340,10 @@ static void lvglPump() {
 static void updateLoadingIp() {
   if (!ui_ipaddr)
     return;
-  const IPAddress ip = wifiConfigLocalIp();
+  // Prefer SoftAP IP on loading — that's the config portal address.
+  IPAddress ip = wifiConfigSoftApIp();
+  if (ip == IPAddress())
+    ip = wifiConfigLocalIp();
   if (ip == IPAddress()) {
     lv_label_set_text(ui_ipaddr, "");
     return;
@@ -402,7 +405,7 @@ static void updateClimateUi() {
   if (frac < 0)
     frac = -frac;
 
-  char intBuf[8];
+  char intBuf[16];
   char fracBuf[4];
   snprintf(intBuf, sizeof(intBuf), "%d", whole);
   snprintf(fracBuf, sizeof(fracBuf), "%d", frac);

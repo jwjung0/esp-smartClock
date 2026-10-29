@@ -141,7 +141,8 @@ static void startMdns() {
 
 static bool connectSta(const String &ssid, const String &pass) {
   Serial.printf("WiFi STA connecting to \"%s\"...\n", ssid.c_str());
-  WiFi.mode(WIFI_STA);
+  // Never WIFI_STA alone — that tears down SoftAP mid-setup.
+  WiFi.mode(WIFI_AP_STA);
   WiFi.begin(ssid.c_str(), pass.c_str());
 
   const uint32_t start = millis();
@@ -155,7 +156,7 @@ static bool connectSta(const String &ssid, const String &pass) {
   }
 
   Serial.println("WiFi STA failed");
-  WiFi.disconnect(true);
+  WiFi.disconnect(false); // keep SoftAP
   return false;
 }
 
@@ -168,15 +169,18 @@ static void startSoftAp() {
   if (softApActive)
     return;
 
-  stopMdns();
   apSsid = kApSsid;
   WiFi.mode(WIFI_AP_STA);
   WiFi.softAPConfig(kApIp, kApIp, IPAddress(255, 255, 255, 0));
-  WiFi.softAP(kApSsid);
+  // Open network, channel 1 — phones often miss hidden/odd-channel APs.
+  if (!WiFi.softAP(kApSsid, nullptr, 1, 0, 4)) {
+    Serial.println("WiFi SoftAP start FAILED");
+    return;
+  }
   dnsServer.start(kDnsPort, "*", kApIp);
   softApActive = true;
   Serial.printf("WiFi SoftAP \"%s\"  http://%s/\n", kApSsid,
-                kApIp.toString().c_str());
+                WiFi.softAPIP().toString().c_str());
 }
 
 static void stopSoftAp() {
@@ -218,6 +222,7 @@ static void handleRoot() {
             "button{margin-top:.75rem;background:#0af;border:none;color:#000;"
             "font-weight:600;cursor:pointer}"
             ".status{font-size:.9rem;line-height:1.5;color:#bbb;margin:0 0 1rem}"
+            ".status a{color:#bbb;text-decoration:none}"
             ".msg{color:#effa5c;margin:.5rem 0}"
             ".color-row{display:flex;align-items:center;gap:.75rem;margin-bottom:.75rem}"
             "button.color-box{width:2.75rem;height:2.75rem;margin:0;padding:0;"
@@ -260,7 +265,7 @@ static void handleRoot() {
   html += F("<br>IP: ");
   html += htmlEscape(ipNow);
   if (sta) {
-    html += F("<br>http://smartclock.local");
+    html += F("<br><a href=\"http://smartclock.local/\">http://smartclock.local</a>");
   }
   html += F("<br>Time zone: KST (UTC+9)");
   html += F("</p>"
@@ -524,26 +529,28 @@ void wifiConfigBegin() {
   loadColors();
 
   WiFi.persistent(false);
-  WiFi.mode(WIFI_STA);
   WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
   const uint32_t t0 = millis();
-  while (millis() - t0 < 100)
+  while (millis() - t0 < 200)
     wifiIdle();
+
+  // SoftAP first so "SmartClock" is visible even while STA joins (or if STA OK).
+  startSoftAp();
+  ensureHttp();
 
   String ssid, pass;
   loadCreds(ssid, pass);
-
   if (ssid.length() && connectSta(ssid, pass)) {
-    WiFi.mode(WIFI_STA);
     startMdns();
     ensureHttp();
     Serial.printf("Config portal: http://%s/  or  http://%s.local/\n",
                   WiFi.localIP().toString().c_str(), kMdnsHost);
-    return;
   }
 
-  startSoftAp();
-  ensureHttp();
+  if (softApActive)
+    Serial.printf("Join SoftAP \"%s\" → http://%s/\n", kApSsid,
+                  WiFi.softAPIP().toString().c_str());
 }
 
 void wifiConfigLoop() {
@@ -559,9 +566,17 @@ bool wifiConfigIsRadioOn() {
   return WiFi.getMode() != WIFI_OFF;
 }
 
+bool wifiConfigSoftApActive() { return softApActive; }
+
 IPAddress wifiConfigLocalIp() {
   if (WiFi.status() == WL_CONNECTED)
     return WiFi.localIP();
+  if (softApActive)
+    return WiFi.softAPIP();
+  return IPAddress();
+}
+
+IPAddress wifiConfigSoftApIp() {
   if (softApActive)
     return WiFi.softAPIP();
   return IPAddress();

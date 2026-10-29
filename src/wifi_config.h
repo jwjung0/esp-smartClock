@@ -9,7 +9,9 @@ void wifiConfigBegin();
 void wifiConfigLoop();
 bool wifiConfigIsConnected();
 bool wifiConfigIsRadioOn();
+bool wifiConfigSoftApActive();
 IPAddress wifiConfigLocalIp();
+IPAddress wifiConfigSoftApIp();
 
 // Power policy: radio off when idle; brief STA wake for NTP (no portal).
 void wifiConfigRadioOff();
