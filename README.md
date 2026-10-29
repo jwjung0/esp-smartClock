@@ -8,7 +8,7 @@ ESP32 digital clock with on-device temperature and humidity. Firmware is built a
 | -------------------------- | ------------------------ |
 | MCU (pick one at build)    | Wi‑Fi; see boards below  |
 | 1.54" LCD (240×240 ST7789) | Time and sensor display  |
-| BME280                     | Temperature and humidity |
+| BME280 or BMP280           | Climate (BMP280 = T+P only) |
 
 Supported boards (pin maps in `include/board_pins_*.h`):
 
@@ -26,26 +26,30 @@ Supported boards (pin maps in `include/board_pins_*.h`):
 | SDA | 11 (D7)       | 23 (D23 / MOSI) |
 | SCL | 7 (D5)        | 18 (D18 / SCK)  |
 | CS  | 13 (D8)       | 5 (D5 / SS)     |
-| DC  | 5 (D0)        | 16 (D16)        |
-| RST | 3 (A0)        | 17 (D17)        |
+| DC  | 5 (D0)        | 16 (RX2)        |
+| RST | 3 (A0)        | 17 (TX2)        |
 | BL  | 16 (D4)       | 22 (D22)        |
 
-**BME280 (I2C)** — address `0x76` by default (`0x77` if needed).
+LCD panel **SDA/SCL are SPI** (MOSI/SCLK), not the BME280 I2C pins. VCC must be **3V3** (not 5V). If your module has no CS pin, leave ESP `D5` unused and set `PIN_TFT_CS` to `-1` in `include/board_pins_esp32dev.h`. On classic ESP32, do **not** use GPIO 25–27 for DC/RST — those are ADC2 and conflict with Wi‑Fi (display can freeze after HTTP).
 
-| BME280 | `s2mini` GPIO | `esp32dev` GPIO |
+**BME280 / BMP280 (I2C)** — address `0x76` by default (`0x77` if needed). Many modules sold as “BME280” are actually **BMP280** (chip-id `0x58`: temperature + pressure, **no humidity**). Firmware auto-detects both.
+
+| BMx280 | `s2mini` GPIO | `esp32dev` GPIO |
 | ------ | ------------- | --------------- |
 | VCC    | 3V3           | 3V3             |
 | GND    | GND           | GND             |
 | SDA    | 33 (D2)       | 21 (D21)        |
 | SCL    | 35 (D1)       | 19 (D19)        |
 
+Six-pin modules also have **CSB** / **SDO** (sometimes silk **CSR** / **SDK**). Leave them at **board default** (usually unconnected). Do not wire those two to ESP GPIOs.
+
 ## Features
 
 **Now**
 
 - PlatformIO project for **S2 Mini** and **ESP32 DevKit** (board chosen at build time)
-- App firmware is the default (LVGL clock UI); optional `checkup` mode for LED + serial smoke test
-- Board check: onboard LED blink + serial heartbeat
+- App firmware is the default (LVGL clock UI); optional `checkup` mode for LED + LCD + serial smoke test
+- Board check: onboard LED blink, LCD color cycle, serial heartbeat
 - Clock UI on the 1.54" LCD (SquareLine / LVGL)
 - Wi‑Fi provisioning via local HTTP portal (SoftAP + STA)
 - NTP time sync in **KST (UTC+9)** → live `ui_time` / `ui_date`
@@ -58,7 +62,8 @@ Supported boards (pin maps in `include/board_pins_*.h`):
 
 **Checkup**
 
-- BME280 over I2C — Serial prints `T` / `RH` / `P` with the LED blink
+- LCD color cycle + BL blink
+- BME280 over I2C — Serial prints pin map, probe `OK`/`FAIL`, then `T` / `RH` / `P` each loop
 
 ## Wi‑Fi + NTP setup
 
@@ -78,14 +83,14 @@ Credentials are stored in NVS (`Preferences` namespace `wifi`).
 
 App is default — scripts take **board** + **deploy** only (do not pass `app`).
 
-| Mode      | Board      | Deploy  | Env (`-e`)              | What runs                          |
-| --------- | ---------- | ------- | ----------------------- | ---------------------------------- |
-| `app`     | `esp32dev` | `prod`  | `app_esp32dev_prod`     | Clock + ingest → Ubuntu (default)  |
-| `app`     | `esp32dev` | `local` | `app_esp32dev_local`    | Clock + ingest → Mac LAN           |
-| `app`     | `s2mini`   | `prod`  | `app_s2mini_prod`       | same on S2 Mini                    |
-| `app`     | `s2mini`   | `local` | `app_s2mini_local`      | same on S2 Mini                    |
-| `checkup` | `esp32dev` | —       | `checkup_esp32dev`      | LED + serial board check           |
-| `checkup` | `s2mini`   | —       | `checkup_s2mini`        | same                               |
+| Mode      | Board      | Deploy  | Env (`-e`)           | What runs                         |
+| --------- | ---------- | ------- | -------------------- | --------------------------------- |
+| `app`     | `esp32dev` | `prod`  | `app_esp32dev_prod`  | Clock + ingest → Ubuntu (default) |
+| `app`     | `esp32dev` | `local` | `app_esp32dev_local` | Clock + ingest → Mac LAN          |
+| `app`     | `s2mini`   | `prod`  | `app_s2mini_prod`    | same on S2 Mini                   |
+| `app`     | `s2mini`   | `local` | `app_s2mini_local`   | same on S2 Mini                   |
+| `checkup` | `esp32dev` | —       | `checkup_esp32dev`   | LED + LCD color cycle + serial    |
+| `checkup` | `s2mini`   | —       | `checkup_s2mini`     | same                              |
 
 Selected at **compile time** in `platformio.ini`.
 
@@ -115,7 +120,7 @@ Selected at **compile time** in `platformio.ini`.
    pio run -e checkup_esp32dev
    pio device monitor -e checkup_esp32dev
    ```
-5. Board check OK when the LED blinks every 1s and the monitor prints `LED ON` / `LED OFF`.
+5. Board check OK when the LED blinks every 1s, the LCD cycles solid colors (RED/GREEN/BLUE/…), and the monitor prints `LED ON` / `LED OFF` plus `LCD fill …`. If backlight is on but colors never change, re-check SPI wires (MOSI/SCLK/CS/DC/RST) — BL alone only proves power + BL pin.
 
 First `pio run` downloads the ESP32 platform and toolchain automatically.
 

@@ -16,14 +16,18 @@ extern void ui_home_screen_destroy(void);
 extern lv_obj_t *ui_home;
 extern lv_obj_t *ui_date;
 extern lv_obj_t *ui_icon_temp;
-extern lv_obj_t *ui_temp;
+extern lv_obj_t *ui_temp1;
 extern lv_obj_t *ui_humid;
 extern lv_obj_t *ui_icon_humid;
 extern lv_obj_t *ui_hline;
 extern lv_obj_t *ui_vline;
 extern lv_obj_t *ui_celsus;
 extern lv_obj_t *ui_pct;
-extern lv_obj_t *ui_time;
+extern lv_obj_t *ui_hh1;
+extern lv_obj_t *ui_mm1;
+extern lv_obj_t *ui_ss1;
+extern lv_obj_t *ui_temp2;
+extern lv_obj_t *ui_tempdot;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus

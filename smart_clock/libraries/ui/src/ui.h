@@ -37,11 +37,14 @@ extern lv_obj_t *ui____initial_actions0;
 // IMAGES AND IMAGE SETS
 LV_IMG_DECLARE( ui_img_512097826);   // assets/temp-cold.png
 LV_IMG_DECLARE( ui_img_2069605658);   // assets/humid-dry.png
-LV_IMG_DECLARE( ui_img_loading_png);   // assets/loading.png
 LV_IMG_DECLARE( ui_img_1873335833);   // assets/humid-norm.png
 LV_IMG_DECLARE( ui_img_5094081);   // assets/humid-wet.png
 LV_IMG_DECLARE( ui_img_1523773831);   // assets/temp-hot.png
 LV_IMG_DECLARE( ui_img_206214294);   // assets/temp-norm.png
+
+// FONTS
+LV_FONT_DECLARE( ui_font_orbitron_20);
+LV_FONT_DECLARE( ui_font_orbitron_48);
 
 // UI INIT
 void ui_init(void);

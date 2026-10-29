@@ -10,6 +10,9 @@
 #define USER_SETUP_INFO "esp-smartClock-esp32dev"
 #endif
 
+// No touch panel — silence TFT_eSPI TOUCH_CS warning.
+#define DISABLE_ALL_LIBRARY_WARNINGS
+
 #define ST7789_DRIVER
 #define TFT_WIDTH  240
 #define TFT_HEIGHT 240
@@ -20,7 +23,12 @@
 #define TFT_DC   PIN_TFT_DC
 #define TFT_RST  PIN_TFT_RST
 #define TFT_BL   PIN_TFT_BL
+#define TFT_MISO -1
+
+// Many 1.54" IPS ST7789 panels need inversion to show a normal image.
+#define TFT_INVERSION_ON
 
 #define LOAD_GLCD
-#define SPI_FREQUENCY  40000000
-#define SPI_READ_FREQUENCY  20000000
+// 10 MHz is more reliable on Dupont jumpers than 40 MHz.
+#define SPI_FREQUENCY  10000000
+#define SPI_READ_FREQUENCY  6000000

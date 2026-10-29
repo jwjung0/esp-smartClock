@@ -25,10 +25,14 @@ bool timeSyncIsReady() {
   return getLocalTime(&t, 0);
 }
 
-bool timeSyncTick(struct tm *out) {
+bool timeSyncGet(struct tm *out) {
   if (!out)
     return false;
-  if (!getLocalTime(out, 0))
+  return getLocalTime(out, 0);
+}
+
+bool timeSyncTick(struct tm *out) {
+  if (!timeSyncGet(out))
     return false;
   if (out->tm_sec == lastSec)
     return false;
@@ -53,6 +57,7 @@ void timeSyncFormatDate(const struct tm &t, char *buf, size_t len) {
 void timeSyncBegin() {}
 void timeSyncRequestResync() {}
 bool timeSyncIsReady() { return false; }
+bool timeSyncGet(struct tm * /*out*/) { return false; }
 bool timeSyncTick(struct tm * /*out*/) { return false; }
 void timeSyncFormatTime(const struct tm & /*t*/, char *buf, size_t len) {
   if (len)

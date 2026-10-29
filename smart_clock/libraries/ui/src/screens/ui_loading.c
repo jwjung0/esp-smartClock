@@ -5,7 +5,7 @@
 
 #include "../ui.h"
 
-lv_obj_t *ui_loading = NULL;lv_obj_t *ui_connect = NULL;lv_obj_t *ui_loading_img = NULL;
+lv_obj_t *ui_loading = NULL;lv_obj_t *ui_connect = NULL;lv_obj_t *ui_ipaddr = NULL;
 // event funtions
 
 // build funtions
@@ -18,21 +18,22 @@ lv_obj_clear_flag( ui_loading, LV_OBJ_FLAG_SCROLLABLE );    /// Flags
 ui_connect = lv_label_create(ui_loading);
 lv_obj_set_width( ui_connect, LV_SIZE_CONTENT);  /// 1
 lv_obj_set_height( ui_connect, LV_SIZE_CONTENT);   /// 1
-lv_obj_set_x( ui_connect, 0 );
-lv_obj_set_y( ui_connect, 21 );
 lv_obj_set_align( ui_connect, LV_ALIGN_CENTER );
 lv_label_set_text(ui_connect,"Connecting WiFi...");
 lv_obj_set_style_text_font(ui_connect, &lv_font_montserrat_18, LV_PART_MAIN| LV_STATE_DEFAULT);
 
-ui_loading_img = lv_img_create(ui_loading);
-lv_img_set_src(ui_loading_img, &ui_img_loading_png);
-lv_obj_set_width( ui_loading_img, LV_SIZE_CONTENT);  /// 1
-lv_obj_set_height( ui_loading_img, LV_SIZE_CONTENT);   /// 1
-lv_obj_set_x( ui_loading_img, 0 );
-lv_obj_set_y( ui_loading_img, -36 );
-lv_obj_set_align( ui_loading_img, LV_ALIGN_CENTER );
-lv_obj_add_flag( ui_loading_img, LV_OBJ_FLAG_ADV_HITTEST );   /// Flags
-lv_obj_clear_flag( ui_loading_img, LV_OBJ_FLAG_SCROLLABLE );    /// Flags
+ui_ipaddr = lv_label_create(ui_loading);
+lv_obj_set_width( ui_ipaddr, LV_SIZE_CONTENT);  /// 1
+lv_obj_set_height( ui_ipaddr, LV_SIZE_CONTENT);   /// 1
+lv_obj_set_x( ui_ipaddr, 0 );
+lv_obj_set_y( ui_ipaddr, 32 );
+lv_obj_set_align( ui_ipaddr, LV_ALIGN_CENTER );
+lv_label_set_text(ui_ipaddr,"192.168.1.1");
+lv_obj_set_style_text_color(ui_ipaddr, lv_color_hex(0xFDDF03), LV_PART_MAIN | LV_STATE_DEFAULT );
+lv_obj_set_style_text_opa(ui_ipaddr, 255, LV_PART_MAIN| LV_STATE_DEFAULT);
+lv_obj_set_style_text_letter_space(ui_ipaddr, 3, LV_PART_MAIN| LV_STATE_DEFAULT);
+lv_obj_set_style_text_line_space(ui_ipaddr, 0, LV_PART_MAIN| LV_STATE_DEFAULT);
+lv_obj_set_style_text_font(ui_ipaddr, &lv_font_montserrat_16, LV_PART_MAIN| LV_STATE_DEFAULT);
 
 }
 
@@ -43,6 +44,6 @@ void ui_loading_screen_destroy(void)
 // NULL screen variables
 ui_loading= NULL;
 ui_connect= NULL;
-ui_loading_img= NULL;
+ui_ipaddr= NULL;
 
 }

@@ -294,7 +294,7 @@ static void handleRoot() {
             "<span class=color-hex id=date_hex>");
   html += dateHtml;
   html += F("</span></div>"
-            "<label>Clock</label>"
+            "<label>HH / MM</label>"
             "<div class=color-row>"
             "<button type=button class=color-box id=clock_box data-target=clock_color "
             "style=\"background:");
@@ -305,7 +305,7 @@ static void handleRoot() {
   html += F("\">"
             "<span class=preview id=clock_preview style=\"color:");
   html += clockHtml;
-  html += F("\">23:59:59</span>"
+  html += F("\">23:59</span>"
             "<span class=color-hex id=clock_hex>");
   html += clockHtml;
   html += F("</span></div>"
@@ -406,7 +406,7 @@ static void handleRoot() {
             "document.getElementById('date_box').addEventListener('click',"
             "()=>openSheet('date_color','Date color'));"
             "document.getElementById('clock_box').addEventListener('click',"
-            "()=>openSheet('clock_color','Clock color'));"
+            "()=>openSheet('clock_color','HH / MM color'));"
             "bg.addEventListener('click',closeSheet);"
             "syncColorUI('date_color');syncColorUI('clock_color');"
             "</script></body></html>");

@@ -40,27 +40,34 @@ static bool postReading(bool sensorOk, float tempC, float humidityPct) {
   }
 
   HTTPClient http;
+  http.setTimeout(5000);
   http.begin(INGEST_URL);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-Device-Token", DEVICE_INGEST_TOKEN);
 
-  String body = "{";
-  body += "\"device_id\":\"" + String(DEVICE_ID) + "\",";
-  body += "\"temperature_c\":";
-  if (sensorOk)
-    body += String(tempC, 2);
-  else
-    body += "null";
-  body += ",\"humidity_pct\":";
-  if (sensorOk)
-    body += String(humidityPct, 2);
-  else
-    body += "null";
-  body += ",\"measured_at\":\"" + iso8601UtcNow() + "\"";
-  body += "}";
+  char body[256];
+  const String measuredAt = iso8601UtcNow();
+  if (sensorOk && !isnan(humidityPct)) {
+    snprintf(body, sizeof(body),
+             "{\"device_id\":\"%s\",\"temperature_c\":%.2f,\"humidity_pct\":%.2f,"
+             "\"measured_at\":\"%s\"}",
+             DEVICE_ID, tempC, humidityPct, measuredAt.c_str());
+  } else if (sensorOk) {
+    snprintf(body, sizeof(body),
+             "{\"device_id\":\"%s\",\"temperature_c\":%.2f,\"humidity_pct\":null,"
+             "\"measured_at\":\"%s\"}",
+             DEVICE_ID, tempC, measuredAt.c_str());
+  } else {
+    snprintf(body, sizeof(body),
+             "{\"device_id\":\"%s\",\"temperature_c\":null,\"humidity_pct\":null,"
+             "\"measured_at\":\"%s\"}",
+             DEVICE_ID, measuredAt.c_str());
+  }
 
+  yield();
   const int code = http.POST(body);
   http.end();
+  yield();
   return code >= 200 && code < 300;
 }
 
@@ -75,7 +82,8 @@ static void scheduleNext(bool wantQuickRetry) {
 }
 
 void dataIngestBegin() {
-  nextPostMs = millis();
+  // Let the home clock paint for a few seconds before the first HTTP POST.
+  nextPostMs = millis() + 15000;
   awaitingQuickRetry = false;
 #if defined(INGEST_ENV_LOCAL)
   Serial.println("data ingest LOCAL: every 10 min (WiFi wake → POST → off)");
@@ -108,7 +116,10 @@ void dataIngestLoop(bool allowRadioOff) {
 
   if (postOk && sensorOk) {
     scheduleNext(false);
-    Serial.printf("data ingest ok  T=%.2f RH=%.1f\n", t, h);
+    if (isnan(h))
+      Serial.printf("data ingest ok  T=%.2f RH=null (BMP280)\n", t);
+    else
+      Serial.printf("data ingest ok  T=%.2f RH=%.1f\n", t, h);
   } else if (postOk && !sensorOk) {
     // Server sees null T/RH → sensor failed/missing.
     scheduleNext(true);

@@ -6,7 +6,6 @@
 
 #include "bme_sensor.h"
 #include "data_ingest.h"
-#include "loading_gif.h"
 #include "time_sync.h"
 #include "wifi_config.h"
 
@@ -19,17 +18,28 @@ static const uint16_t kScreenH = 240;
 static const uint32_t kNtpWaitMs = 15000;
 static const uint32_t kBootConfigMs = 10UL * 60UL * 1000UL;   // portal window
 static const uint32_t kDailySyncMs = 24UL * 60UL * 60UL * 1000UL;
+static const uint32_t kClimateUiMs = 5000; // refresh ui_temp1 / ui_temp2 from BMx280
 
 static lv_disp_draw_buf_t draw_buf;
 static lv_color_t buf[kScreenW * kScreenH / 10];
 static TFT_eSPI tft = TFT_eSPI(kScreenW, kScreenH);
-static lv_obj_t *loadingGif = nullptr;
 static bool onHomeScreen = false;
-static lv_img_dsc_t loading_gif_dsc;
 
 static uint32_t bootConfigUntilMs = 0;
 static uint32_t nextNtpSyncMs = 0;
+static uint32_t nextClimateUiMs = 0;
 static bool bootConfigOpen = false;
+
+// HH/MM/SS as two fixed-width digit cells (proportional fonts won't shift).
+struct DigitPair {
+  lv_obj_t *tens;
+  lv_obj_t *ones;
+};
+static DigitPair hhPair = {};
+static DigitPair mmPair = {};
+static DigitPair ssPair = {};
+static lv_obj_t *colonDotTop = nullptr;
+static lv_obj_t *colonDotBot = nullptr;
 
 static void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area,
                           lv_color_t *color_p) {
@@ -50,10 +60,276 @@ static void my_touchpad_read(lv_indev_drv_t * /*indev_driver*/,
 }
 
 static void applyClockColors() {
+  // Portal "clock" color → HH / MM / colon dots.
+  const lv_color_t clock = lv_color_hex(wifiConfigClockColor());
   lv_obj_set_style_text_color(ui_date, lv_color_hex(wifiConfigDateColor()),
                               LV_PART_MAIN | LV_STATE_DEFAULT);
-  lv_obj_set_style_text_color(ui_time, lv_color_hex(wifiConfigClockColor()),
-                              LV_PART_MAIN | LV_STATE_DEFAULT);
+  for (lv_obj_t *d : {hhPair.tens, hhPair.ones, mmPair.tens, mmPair.ones}) {
+    if (d)
+      lv_obj_set_style_text_color(d, clock, LV_PART_MAIN | LV_STATE_DEFAULT);
+  }
+  for (lv_obj_t *dot : {colonDotTop, colonDotBot}) {
+    if (dot)
+      lv_obj_set_style_bg_color(dot, clock, LV_PART_MAIN | LV_STATE_DEFAULT);
+  }
+}
+
+static void styleSolidBlack(lv_obj_t *obj) {
+  if (!obj)
+    return;
+  lv_obj_set_style_bg_color(obj, lv_color_hex(0x000000),
+                            LV_PART_MAIN | LV_STATE_DEFAULT);
+  lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+}
+
+static lv_coord_t maxDigitGlyphWidth(const lv_font_t *font,
+                                     lv_coord_t letterSpace) {
+  lv_coord_t maxW = 0;
+  for (char d = '0'; d <= '9'; ++d) {
+    char s[2] = {d, '\0'};
+    const lv_coord_t w =
+        lv_txt_get_width(s, 1, font, letterSpace, LV_TEXT_FLAG_NONE);
+    if (w > maxW)
+      maxW = w;
+  }
+  return maxW;
+}
+
+// Replace a 2-digit SquareLine label with two fixed digit slots (no proportional shift).
+static void setupDigitPair(DigitPair *pair, lv_obj_t *host) {
+  if (!pair || !host || !ui_home)
+    return;
+  if (pair->tens) // already built
+    return;
+
+  const lv_font_t *font = lv_obj_get_style_text_font(host, LV_PART_MAIN);
+  if (!font)
+    return;
+
+  const lv_color_t color = lv_obj_get_style_text_color(host, LV_PART_MAIN);
+  const lv_coord_t letterSpace =
+      lv_obj_get_style_text_letter_space(host, LV_PART_MAIN);
+  const lv_coord_t digitW = maxDigitGlyphWidth(font, letterSpace) + 2;
+  const lv_coord_t pairW = digitW * 2;
+  const lv_coord_t lineH = lv_font_get_line_height(font) + 2;
+  // Use style offsets (SquareLine ALIGN_CENTER), NOT lv_obj_get_x/y (absolute after layout).
+  const lv_coord_t x = lv_obj_get_style_x(host, LV_PART_MAIN);
+  const lv_coord_t y = lv_obj_get_style_y(host, LV_PART_MAIN);
+
+  lv_obj_add_flag(host, LV_OBJ_FLAG_HIDDEN);
+
+  lv_obj_t *box = lv_obj_create(ui_home);
+  lv_obj_remove_style_all(box);
+  lv_obj_set_size(box, pairW, lineH);
+  lv_obj_set_style_bg_opa(box, LV_OPA_TRANSP, LV_PART_MAIN);
+  lv_obj_set_style_border_width(box, 0, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(box, 0, LV_PART_MAIN);
+  lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_align(box, LV_ALIGN_CENTER, x, y);
+
+  pair->tens = lv_label_create(box);
+  pair->ones = lv_label_create(box);
+  for (lv_obj_t *dig : {pair->tens, pair->ones}) {
+    lv_obj_set_width(dig, digitW);
+    lv_label_set_long_mode(dig, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_font(dig, font, LV_PART_MAIN);
+    lv_obj_set_style_text_color(dig, color, LV_PART_MAIN);
+    lv_obj_set_style_text_align(dig, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_style_text_letter_space(dig, letterSpace, LV_PART_MAIN);
+    lv_label_set_text(dig, "0");
+  }
+  lv_obj_align(pair->tens, LV_ALIGN_LEFT_MID, 0, 0);
+  lv_obj_align(pair->ones, LV_ALIGN_RIGHT_MID, 0, 0);
+}
+
+static void setDigitPair(const DigitPair &pair, int value) {
+  if (!pair.tens || !pair.ones)
+    return;
+  if (value < 0)
+    value = 0;
+  char t[2] = {static_cast<char>('0' + ((value / 10) % 10)), '\0'};
+  char o[2] = {static_cast<char>('0' + (value % 10)), '\0'};
+  if (strcmp(lv_label_get_text(pair.tens), t) != 0)
+    lv_label_set_text(pair.tens, t);
+  if (strcmp(lv_label_get_text(pair.ones), o) != 0)
+    lv_label_set_text(pair.ones, o);
+}
+
+// Blink two 6px dots between HH and MM (ui_colon1 removed from SquareLine).
+static void setupColonDots() {
+  if (!ui_home || !ui_hh1 || !ui_mm1 || colonDotTop)
+    return;
+
+  // Midpoint between HH/MM style offsets (ALIGN_CENTER).
+  const lv_coord_t hx = lv_obj_get_style_x(ui_hh1, LV_PART_MAIN);
+  const lv_coord_t mx = lv_obj_get_style_x(ui_mm1, LV_PART_MAIN);
+  const lv_coord_t hy = lv_obj_get_style_y(ui_hh1, LV_PART_MAIN);
+  const lv_coord_t cx = (hx + mx) / 2;
+  const lv_coord_t cy = hy;
+  const lv_color_t color = lv_color_hex(wifiConfigClockColor());
+
+  for (int i = 0; i < 2; ++i) {
+    lv_obj_t *dot = lv_obj_create(ui_home);
+    lv_obj_remove_style_all(dot);
+    lv_obj_set_size(dot, 6, 6);
+    lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(dot, color, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(dot, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_align(dot, LV_ALIGN_CENTER, cx, cy + (i == 0 ? -10 : 10));
+    if (i == 0)
+      colonDotTop = dot;
+    else
+      colonDotBot = dot;
+  }
+}
+
+// Lock label width to widest glyphs so "1"→"8" etc. does not shift neighbors.
+static void fixDigitLabelWidth(lv_obj_t *label, uint8_t glyphCount,
+                               const char *glyphs, lv_text_align_t align) {
+  if (!label || glyphCount == 0)
+    return;
+
+  const lv_font_t *font = lv_obj_get_style_text_font(label, LV_PART_MAIN);
+  if (!font)
+    return;
+
+  const lv_coord_t letterSpace =
+      lv_obj_get_style_text_letter_space(label, LV_PART_MAIN);
+
+  lv_coord_t maxW = 0;
+  for (const char *p = glyphs; *p; ++p) {
+    char s[2] = {*p, '\0'};
+    const lv_coord_t w =
+        lv_txt_get_width(s, 1, font, letterSpace, LV_TEXT_FLAG_NONE);
+    if (w > maxW)
+      maxW = w;
+  }
+
+  const lv_coord_t width =
+      (lv_coord_t)(maxW * glyphCount + letterSpace * (glyphCount - 1) + 4);
+
+  lv_label_set_long_mode(label, LV_LABEL_LONG_CLIP);
+  lv_obj_set_style_min_width(label, width, LV_PART_MAIN);
+  lv_obj_set_width(label, width);
+  lv_obj_set_style_text_align(label, align, LV_PART_MAIN);
+}
+
+// Lock widths, then place dot exactly midway between int and frac (equal gaps).
+static void layoutTempCluster() {
+  static const char kDigits[] = "0123456789";
+  static const char kTempInt[] = "0123456789-";
+  static const lv_coord_t kGap = 2; // equal space: int | gap | . | gap | frac
+
+  if (!ui_temp1 || !ui_temp2 || !ui_tempdot)
+    return;
+
+  fixDigitLabelWidth(ui_temp1, 2, kTempInt, LV_TEXT_ALIGN_RIGHT);
+  fixDigitLabelWidth(ui_temp2, 1, kDigits, LV_TEXT_ALIGN_CENTER);
+
+  const lv_font_t *dotFont =
+      lv_obj_get_style_text_font(ui_tempdot, LV_PART_MAIN);
+  lv_coord_t dotW = 2;
+  if (dotFont) {
+    const lv_coord_t glyph =
+        lv_txt_get_width(".", 1, dotFont, 0, LV_TEXT_FLAG_NONE) + 2;
+    dotW = glyph / 2;
+    if (dotW < 2)
+      dotW = 2;
+  }
+  lv_label_set_text(ui_tempdot, ".");
+  lv_label_set_long_mode(ui_tempdot, LV_LABEL_LONG_CLIP);
+  lv_obj_set_width(ui_tempdot, dotW);
+  lv_obj_set_style_text_align(ui_tempdot, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  lv_obj_set_style_text_opa(ui_tempdot, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_clear_flag(ui_tempdot, LV_OBJ_FLAG_HIDDEN);
+
+  // Style offsets only (ALIGN_CENTER) — never lv_obj_get_x after layout.
+  const lv_coord_t t1x = lv_obj_get_style_x(ui_temp1, LV_PART_MAIN);
+  const lv_coord_t t1w = lv_obj_get_style_width(ui_temp1, LV_PART_MAIN);
+  const lv_coord_t t2w = lv_obj_get_style_width(ui_temp2, LV_PART_MAIN);
+  const lv_coord_t dotY = lv_obj_get_style_y(ui_tempdot, LV_PART_MAIN);
+  const lv_coord_t t2y = lv_obj_get_style_y(ui_temp2, LV_PART_MAIN);
+
+  const lv_coord_t intRight = t1x + t1w / 2;
+  const lv_coord_t dotX = intRight + kGap + dotW / 2;
+  const lv_coord_t t2x = dotX + dotW / 2 + kGap + t2w / 2;
+
+  lv_obj_align(ui_tempdot, LV_ALIGN_CENTER, dotX, dotY);
+  lv_obj_align(ui_temp2, LV_ALIGN_CENTER, t2x, t2y);
+  lv_obj_move_foreground(ui_tempdot);
+  lv_obj_move_foreground(ui_temp2);
+}
+
+static void fixNumericLabelWidths() {
+  static const char kDigits[] = "0123456789";
+
+  // Time: true per-digit slots (fixes seconds shift with Orbitron).
+  // Must run before layout update so we read SquareLine style offsets.
+  setupDigitPair(&hhPair, ui_hh1);
+  setupDigitPair(&mmPair, ui_mm1);
+  setupDigitPair(&ssPair, ui_ss1);
+  setupColonDots();
+
+  layoutTempCluster();
+  fixDigitLabelWidth(ui_humid, 2, kDigits, LV_TEXT_ALIGN_CENTER);
+
+  // Date: reserve width for a worst-case string so day/month changes don't jump.
+  if (ui_date) {
+    const lv_font_t *font = lv_obj_get_style_text_font(ui_date, LV_PART_MAIN);
+    if (font) {
+      const char *sample = "0000 00/00 WWW";
+      const lv_coord_t w =
+          lv_txt_get_width(sample, strlen(sample), font, 0, LV_TEXT_FLAG_NONE) +
+          4;
+      lv_label_set_long_mode(ui_date, LV_LABEL_LONG_CLIP);
+      lv_obj_set_style_min_width(ui_date, w, LV_PART_MAIN);
+      lv_obj_set_width(ui_date, w);
+      lv_obj_set_style_text_align(ui_date, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    }
+  }
+}
+
+static void applyDarkTheme() {
+  const lv_color_t white = lv_color_hex(0xFFFFFF);
+  const lv_color_t line = lv_color_hex(0x333333);
+
+  styleSolidBlack(ui_home);
+  styleSolidBlack(ui_loading);
+  lv_disp_set_bg_color(NULL, lv_color_hex(0x000000));
+  lv_disp_set_bg_opa(NULL, LV_OPA_COVER);
+
+  if (ui_connect)
+    lv_obj_set_style_text_color(ui_connect, white,
+                                LV_PART_MAIN | LV_STATE_DEFAULT);
+  if (ui_temp1)
+    lv_obj_set_style_text_color(ui_temp1, white,
+                                LV_PART_MAIN | LV_STATE_DEFAULT);
+  if (ui_temp2)
+    lv_obj_set_style_text_color(ui_temp2, white,
+                                LV_PART_MAIN | LV_STATE_DEFAULT);
+  if (ui_tempdot)
+    lv_obj_set_style_text_color(ui_tempdot, white,
+                                LV_PART_MAIN | LV_STATE_DEFAULT);
+  if (ui_humid)
+    lv_obj_set_style_text_color(ui_humid, white,
+                                LV_PART_MAIN | LV_STATE_DEFAULT);
+  if (ui_celsus)
+    lv_obj_set_style_text_color(ui_celsus, white,
+                                LV_PART_MAIN | LV_STATE_DEFAULT);
+  if (ui_pct)
+    lv_obj_set_style_text_color(ui_pct, white, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+  for (lv_obj_t *bar : {ui_hline, ui_vline}) {
+    if (!bar)
+      continue;
+    lv_obj_set_style_bg_color(bar, line, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(bar, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+  }
+
+  fixNumericLabelWidths();
 }
 
 static void lvglPump() {
@@ -61,40 +337,132 @@ static void lvglPump() {
   delay(5);
 }
 
+static void updateLoadingIp() {
+  if (!ui_ipaddr)
+    return;
+  const IPAddress ip = wifiConfigLocalIp();
+  if (ip == IPAddress()) {
+    lv_label_set_text(ui_ipaddr, "");
+    return;
+  }
+  lv_label_set_text(ui_ipaddr, ip.toString().c_str());
+}
+
 static void showLoading(const char *status) {
   if (ui_connect)
     lv_label_set_text(ui_connect, status);
+  updateLoadingIp();
   lv_disp_load_scr(ui_loading);
   onHomeScreen = false;
   lvglPump();
 }
 
+// Temp icons: cold <18°C, hot ≥28°C, else moderate.
+static void setTempIcon(float tC) {
+  if (!ui_icon_temp)
+    return;
+  const lv_img_dsc_t *src = &ui_img_206214294; // temp-norm
+  if (tC < 18.0f)
+    src = &ui_img_512097826; // temp-cold
+  else if (tC >= 28.0f)
+    src = &ui_img_1523773831; // temp-hot
+  if (lv_img_get_src(ui_icon_temp) != src)
+    lv_img_set_src(ui_icon_temp, src);
+}
+
+// Humid icons: dry <40%, wet ≥60%, else moderate.
+static void setHumidIcon(float rhPct) {
+  if (!ui_icon_humid)
+    return;
+  const lv_img_dsc_t *src = &ui_img_1873335833; // humid-norm
+  if (rhPct < 40.0f)
+    src = &ui_img_2069605658; // humid-dry
+  else if (rhPct >= 60.0f)
+    src = &ui_img_5094081; // humid-wet
+  if (lv_img_get_src(ui_icon_humid) != src)
+    lv_img_set_src(ui_icon_humid, src);
+}
+
+static void updateClimateUi() {
+  float t = 0, h = 0, p = 0;
+  if (!bmeSensorRead(&t, &h, &p)) {
+    if (ui_temp1)
+      lv_label_set_text(ui_temp1, "--");
+    if (ui_temp2)
+      lv_label_set_text(ui_temp2, "-");
+    if (ui_humid)
+      lv_label_set_text(ui_humid, "--");
+    return;
+  }
+
+  // Round to 1 decimal, then split: ui_temp1=int, ui_temp2=one digit (dot is ui_tempdot).
+  const int tenths = (int)lroundf(t * 10.0f);
+  const int whole = tenths / 10;
+  int frac = tenths % 10;
+  if (frac < 0)
+    frac = -frac;
+
+  char intBuf[8];
+  char fracBuf[4];
+  snprintf(intBuf, sizeof(intBuf), "%d", whole);
+  snprintf(fracBuf, sizeof(fracBuf), "%d", frac);
+
+  if (ui_temp1)
+    lv_label_set_text(ui_temp1, intBuf);
+  if (ui_temp2)
+    lv_label_set_text(ui_temp2, fracBuf);
+  setTempIcon(t);
+
+  if (ui_humid) {
+    if (!bmeSensorHasHumidity() || isnan(h))
+      lv_label_set_text(ui_humid, "--");
+    else {
+      char humBuf[8];
+      snprintf(humBuf, sizeof(humBuf), "%d", (int)lroundf(h));
+      lv_label_set_text(ui_humid, humBuf);
+      setHumidIcon(h);
+    }
+  }
+}
+
+static void blinkColon(const struct tm &localTm) {
+  if (!colonDotTop || !colonDotBot)
+    return;
+  const bool on = (localTm.tm_sec & 1) == 0;
+  for (lv_obj_t *dot : {colonDotTop, colonDotBot}) {
+    if (on)
+      lv_obj_clear_flag(dot, LV_OBJ_FLAG_HIDDEN);
+    else
+      lv_obj_add_flag(dot, LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
+static void paintTime(const struct tm &localTm) {
+  static int lastYday = -1;
+
+  setDigitPair(hhPair, localTm.tm_hour);
+  setDigitPair(mmPair, localTm.tm_min);
+  setDigitPair(ssPair, localTm.tm_sec);
+
+  if (ui_date && localTm.tm_yday != lastYday) {
+    char dateBuf[32];
+    timeSyncFormatDate(localTm, dateBuf, sizeof(dateBuf));
+    lv_label_set_text(ui_date, dateBuf);
+    lastYday = localTm.tm_yday;
+  }
+  blinkColon(localTm);
+}
+
 static void showHome() {
   applyClockColors();
+  struct tm localTm;
+  if (timeSyncGet(&localTm))
+    paintTime(localTm);
+  updateClimateUi();
+  nextClimateUiMs = millis() + kClimateUiMs;
   lv_disp_load_scr(ui_home);
   onHomeScreen = true;
   lvglPump();
-}
-
-static void setupLoadingGif() {
-  if (!ui_loading_img)
-    return;
-
-  memset(&loading_gif_dsc, 0, sizeof(loading_gif_dsc));
-  loading_gif_dsc.header.always_zero = 0;
-  loading_gif_dsc.header.w = 64;
-  loading_gif_dsc.header.h = 64;
-  loading_gif_dsc.header.cf = LV_IMG_CF_RAW;
-  loading_gif_dsc.data_size = kLoadingGifSize;
-  loading_gif_dsc.data = loading_gif_data;
-
-  lv_obj_add_flag(ui_loading_img, LV_OBJ_FLAG_HIDDEN);
-
-  loadingGif = lv_gif_create(ui_loading);
-  lv_gif_set_src(loadingGif, &loading_gif_dsc);
-  lv_obj_set_x(loadingGif, lv_obj_get_x(ui_loading_img));
-  lv_obj_set_y(loadingGif, lv_obj_get_y(ui_loading_img));
-  lv_obj_set_align(loadingGif, LV_ALIGN_CENTER);
 }
 
 static void waitForNtp() {
@@ -157,12 +525,19 @@ void clockAppSetup() {
   lv_init();
 
   tft.begin();
-  tft.setRotation(3);
+  // Match working Adafruit checkup orientation on 240x240 ST7789.
+  tft.setRotation(0);
 
 #ifdef TFT_BL
   pinMode(TFT_BL, OUTPUT);
   digitalWrite(TFT_BL, HIGH);
 #endif
+
+  // Prove TFT_eSPI is talking before LVGL takes over.
+  tft.fillScreen(TFT_BLACK);
+  Serial.printf("TFT setup %s  MOSI=%d SCLK=%d CS=%d DC=%d RST=%d BL=%d\n",
+                USER_SETUP_INFO, PIN_TFT_MOSI, PIN_TFT_SCLK, PIN_TFT_CS,
+                PIN_TFT_DC, PIN_TFT_RST, PIN_TFT_BL);
 
   lv_disp_draw_buf_init(&draw_buf, buf, NULL, kScreenW * kScreenH / 10);
 
@@ -181,13 +556,15 @@ void clockAppSetup() {
   lv_indev_drv_register(&indev_drv);
 
   ui_init();
-  setupLoadingGif();
+  applyDarkTheme();
   wifiConfigSetIdleCallback(lvglPump);
 
   showLoading("Connecting WiFi...");
   Serial.println("UI init done (loading)");
 
   wifiConfigBegin();
+  updateLoadingIp(); // STA or SoftAP IP once WiFi is up
+  lvglPump();
 
   if (wifiConfigIsConnected()) {
     timeSyncBegin();
@@ -213,6 +590,26 @@ void clockAppSetup() {
 }
 
 void clockAppLoop() {
+  // Keep UI alive first — WiFi/HTTP/I2C must not starve the clock.
+  if (onHomeScreen) {
+    struct tm localTm;
+    if (timeSyncTick(&localTm)) {
+      paintTime(localTm);
+      // Flush dirty areas now — otherwise colon/digits redraw across many
+      // partial refreshes and look like a slow fade over the whole second.
+      lv_refr_now(NULL);
+    }
+    if ((int32_t)(millis() - nextClimateUiMs) >= 0) {
+      updateClimateUi();
+      nextClimateUiMs = millis() + kClimateUiMs;
+    }
+  }
+
+  if (wifiConfigTakeColorsChanged())
+    applyClockColors();
+
+  lv_timer_handler();
+
   if (bootConfigOpen) {
     wifiConfigLoop();
     if ((int32_t)(millis() - bootConfigUntilMs) >= 0)
@@ -223,23 +620,6 @@ void clockAppLoop() {
 
   dataIngestLoop(!bootConfigOpen);
 
-  if (wifiConfigTakeColorsChanged())
-    applyClockColors();
-
-  if (onHomeScreen) {
-    struct tm localTm;
-    if (timeSyncTick(&localTm)) {
-      char timeBuf[16];
-      char dateBuf[32];
-      timeSyncFormatTime(localTm, timeBuf, sizeof(timeBuf));
-      timeSyncFormatDate(localTm, dateBuf, sizeof(dateBuf));
-      lv_label_set_text(ui_time, timeBuf);
-      lv_label_set_text(ui_date, dateBuf);
-      Serial.printf("time %s  date %s\n", timeBuf, dateBuf);
-    }
-  }
-
-  lv_timer_handler();
   delay(5);
 }
 

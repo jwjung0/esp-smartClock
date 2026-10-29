@@ -15,7 +15,7 @@ extern void ui_loading_screen_init(void);
 extern void ui_loading_screen_destroy(void);
 extern lv_obj_t *ui_loading;
 extern lv_obj_t *ui_connect;
-extern lv_obj_t *ui_loading_img;
+extern lv_obj_t *ui_ipaddr;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus

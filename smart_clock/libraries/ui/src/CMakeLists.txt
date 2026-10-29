@@ -5,10 +5,11 @@ SET(SOURCES screens/ui_home.c
     ui_helpers.c
     images/ui_img_512097826.c
     images/ui_img_2069605658.c
-    images/ui_img_loading_png.c
     images/ui_img_1873335833.c
     images/ui_img_5094081.c
     images/ui_img_1523773831.c
-    images/ui_img_206214294.c)
+    images/ui_img_206214294.c
+    fonts/ui_font_orbitron_20.c
+    fonts/ui_font_orbitron_48.c)
 
 add_library(ui ${SOURCES})
