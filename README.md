@@ -50,7 +50,7 @@ Supported boards (pin maps in `include/board_pins_*.h`):
 - Wi‑Fi provisioning via local HTTP portal (SoftAP + STA)
 - NTP time sync in **KST (UTC+9)** → live `ui_time` / `ui_date`
 - Power policy: **10 min** config window after boot, then Wi‑Fi off; **daily** NTP resync; **every 10 min** climate data ingest (brief Wi‑Fi wake → POST → off)
-- Climate ingest deploy targets: **local** (this Mac) vs **prod** (Ubuntu) via `include/ingest_config_*.h`
+- Climate ingest deploy targets: **local** (this Mac) vs **prod** (Ubuntu) via gitignored `include/ingest_config_*.h`
 
 **Planned**
 
@@ -70,7 +70,7 @@ Supported boards (pin maps in `include/board_pins_*.h`):
 6. SoftAP setup stays **http://192.168.4.1/**.
 7. Portal stays up for **10 minutes after boot**, then Wi‑Fi turns off. Power-cycle for another config window.
 8. NTP resyncs about **once per day** (brief Wi‑Fi wake, then off again). Time zone: **KST**.
-9. After the config window, climate readings POST about **every 10 minutes** (Wi‑Fi on → POST → off). Set URL/token in `include/ingest_config_local.h` or `include/ingest_config_prod.h`.
+9. After the config window, climate readings POST about **every 10 minutes** (Wi‑Fi on → POST → off). Set URL/token in gitignored `include/ingest_config_local.h` / `include/ingest_config_prod.h`.
 
 Credentials are stored in NVS (`Preferences` namespace `wifi`).
 
@@ -124,7 +124,7 @@ First `pio run` downloads the ESP32 platform and toolchain automatically.
 ```
 platformio.ini              # envs: app_<board>_<local|prod>, checkup_<board>
 include/board_pins_*.h      # per-board LCD / BME280 / LED pins
-include/ingest_config_*.h   # local vs prod ingest URL / token
+include/ingest_config_*.h   # local vs prod URL/token (gitignored)
 src/main.cpp                # setup/loop — switches on FIRMWARE_MODE_*
 src/board_check.h/.cpp      # LED + serial smoke test
 src/clock_app.h/.cpp        # LVGL clock app
