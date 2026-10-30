@@ -204,6 +204,14 @@ static lv_color_t grey_filter_cb(const lv_color_filter_dsc_t * f, lv_color_t col
 
 static void style_init(void)
 {
+    color_scr = theme.flags & MODE_DARK ? DARK_COLOR_SCR : LIGHT_COLOR_SCR;
+    color_text = theme.flags & MODE_DARK ? DARK_COLOR_TEXT : LIGHT_COLOR_TEXT;
+    color_card = theme.flags & MODE_DARK ? DARK_COLOR_CARD : LIGHT_COLOR_CARD;
+    color_grey = theme.flags & MODE_DARK ? DARK_COLOR_GREY : LIGHT_COLOR_GREY;
+
+    style_init_reset(&styles->transition_delayed);
+    style_init_reset(&styles->transition_normal);
+#if TRANSITION_TIME
     static const lv_style_prop_t trans_props[] = {
         LV_STYLE_BG_OPA, LV_STYLE_BG_COLOR,
         LV_STYLE_TRANSFORM_WIDTH, LV_STYLE_TRANSFORM_HEIGHT,
@@ -213,14 +221,6 @@ static void style_init(void)
         0
     };
 
-    color_scr = theme.flags & MODE_DARK ? DARK_COLOR_SCR : LIGHT_COLOR_SCR;
-    color_text = theme.flags & MODE_DARK ? DARK_COLOR_TEXT : LIGHT_COLOR_TEXT;
-    color_card = theme.flags & MODE_DARK ? DARK_COLOR_CARD : LIGHT_COLOR_CARD;
-    color_grey = theme.flags & MODE_DARK ? DARK_COLOR_GREY : LIGHT_COLOR_GREY;
-
-    style_init_reset(&styles->transition_delayed);
-    style_init_reset(&styles->transition_normal);
-#if TRANSITION_TIME
     static lv_style_transition_dsc_t trans_delayed;
     lv_style_transition_dsc_init(&trans_delayed, trans_props, lv_anim_path_linear, TRANSITION_TIME, 70, NULL);
 

@@ -443,7 +443,7 @@ static const uint32_t kHumidHighColor = 0x0490F9;
 static ClimateLevel levelFromTemp(float t) {
   if (t < 18.0f)
     return ClimateLevel::Low;
-  if (t > 26.0f)
+  if (t > 28.0f)
     return ClimateLevel::High;
   return ClimateLevel::Norm;
 }
