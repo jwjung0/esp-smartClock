@@ -32,6 +32,12 @@ extern lv_obj_t *ui_current_celcus;
 extern lv_obj_t *ui_current_pct;
 extern lv_obj_t *ui_icon_humid;
 extern lv_obj_t *ui_icon_temp;
+extern lv_obj_t *ui_temp_low;
+extern lv_obj_t *ui_humid_high;
+extern lv_obj_t *ui_temp_norm;
+extern lv_obj_t *ui_temp_high;
+extern lv_obj_t *ui_humid_norm;
+extern lv_obj_t *ui_humid_low;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus

@@ -36,6 +36,11 @@ static void setBacklight(bool on) {
   digitalWrite(PIN_TFT_BL, on ? HIGH : LOW);
 }
 
+// Cast before | — LV_PART_* and LV_STATE_* are different enums (GCC warning).
+static const lv_style_selector_t kMain =
+    static_cast<lv_style_selector_t>(LV_PART_MAIN) |
+    static_cast<lv_style_selector_t>(LV_STATE_DEFAULT);
+
 // HH/MM/SS as two fixed-width digit cells (proportional fonts won't shift).
 struct DigitPair {
   lv_obj_t *tens;
@@ -70,16 +75,16 @@ static void applyClockColors() {
   const lv_color_t clock = lv_color_hex(wifiConfigClockColor());
   const lv_color_t date = lv_color_hex(wifiConfigDateColor());
   if (ui_date)
-    lv_obj_set_style_text_color(ui_date, date, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(ui_date, date, kMain);
   if (ui_wkday)
-    lv_obj_set_style_text_color(ui_wkday, date, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(ui_wkday, date, kMain);
   for (lv_obj_t *d : {hhPair.tens, hhPair.ones, mmPair.tens, mmPair.ones}) {
     if (d)
-      lv_obj_set_style_text_color(d, clock, LV_PART_MAIN | LV_STATE_DEFAULT);
+      lv_obj_set_style_text_color(d, clock, kMain);
   }
   for (lv_obj_t *dot : {colonDotTop, colonDotBot}) {
     if (dot)
-      lv_obj_set_style_bg_color(dot, clock, LV_PART_MAIN | LV_STATE_DEFAULT);
+      lv_obj_set_style_bg_color(dot, clock, kMain);
   }
 }
 
@@ -87,8 +92,8 @@ static void styleSolidBlack(lv_obj_t *obj) {
   if (!obj)
     return;
   lv_obj_set_style_bg_color(obj, lv_color_hex(0x000000),
-                            LV_PART_MAIN | LV_STATE_DEFAULT);
-  lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+                            kMain);
+  lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, kMain);
 }
 
 static lv_coord_t maxDigitGlyphWidth(const lv_font_t *font,
@@ -276,32 +281,37 @@ static void applyDarkTheme() {
   lv_disp_set_bg_color(NULL, lv_color_hex(0x000000));
   lv_disp_set_bg_opa(NULL, LV_OPA_COVER);
 
+  if (ui_box1) {
+    lv_obj_set_style_border_color(ui_box1, lv_color_hex(0x222222), kMain);
+    lv_obj_set_style_radius(ui_box1, 2, kMain);
+  }
+
   if (ui_connect)
     lv_obj_set_style_text_color(ui_connect, white,
-                                LV_PART_MAIN | LV_STATE_DEFAULT);
+                                kMain);
   if (ui_temp)
     lv_obj_set_style_text_color(ui_temp, white,
-                                LV_PART_MAIN | LV_STATE_DEFAULT);
+                                kMain);
   if (ui_humid)
     lv_obj_set_style_text_color(ui_humid, white,
-                                LV_PART_MAIN | LV_STATE_DEFAULT);
+                                kMain);
   if (ui_celsus)
     lv_obj_set_style_text_color(ui_celsus, white,
-                                LV_PART_MAIN | LV_STATE_DEFAULT);
+                                kMain);
   if (ui_pct)
-    lv_obj_set_style_text_color(ui_pct, white, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(ui_pct, white, kMain);
   if (ui_current_temp)
     lv_obj_set_style_text_color(ui_current_temp, white,
-                                LV_PART_MAIN | LV_STATE_DEFAULT);
+                                kMain);
   if (ui_current_humid)
     lv_obj_set_style_text_color(ui_current_humid, white,
-                                LV_PART_MAIN | LV_STATE_DEFAULT);
+                                kMain);
   if (ui_current_celcus)
     lv_obj_set_style_text_color(ui_current_celcus, white,
-                                LV_PART_MAIN | LV_STATE_DEFAULT);
+                                kMain);
   if (ui_current_pct)
     lv_obj_set_style_text_color(ui_current_pct, white,
-                                LV_PART_MAIN | LV_STATE_DEFAULT);
+                                kMain);
 
   fixNumericLabelWidths();
 }
@@ -335,6 +345,14 @@ static void showLoading(const char *status) {
   lv_refr_now(NULL); // full flush before backlight may turn on
 }
 
+static bool isLocalNight() {
+  struct tm t;
+  if (!timeSyncGet(&t))
+    return false;
+  // Coarse day/night for Clear icon (local clock).
+  return t.tm_hour < 6 || t.tm_hour >= 20;
+}
+
 // OpenWeather weather[0].main → SquareLine weather assets on ui_weather.
 static void setWeatherIcon(const char *main) {
   if (!ui_weather)
@@ -342,7 +360,8 @@ static void setWeatherIcon(const char *main) {
   const lv_img_dsc_t *src = &ui_img_575321948; // weather-clouds
   if (main && main[0]) {
     if (strcmp(main, "Clear") == 0)
-      src = &ui_img_weather_clear_png;
+      src = isLocalNight() ? &ui_img_1018541966 // weather-clear-night
+                           : &ui_img_weather_clear_png;
     else if (strcmp(main, "Clouds") == 0)
       src = &ui_img_575321948;
     else if (strcmp(main, "Rain") == 0 || strcmp(main, "Drizzle") == 0)
@@ -363,13 +382,23 @@ static void setWeatherIcon(const char *main) {
     lv_img_set_src(ui_weather, src);
 }
 
+static void refreshWeatherIconFromCache() {
+  char mainBuf[16];
+  if (!weatherFetchGet(nullptr, nullptr, mainBuf, sizeof(mainBuf)))
+    return;
+  setWeatherIcon(mainBuf);
+}
+
 static void updateWifiIcon() {
   if (!ui_wifi)
     return;
-  if (wifiConfigIsRadioOn())
-    lv_obj_clear_flag(ui_wifi, LV_OBJ_FLAG_HIDDEN);
-  else
-    lv_obj_add_flag(ui_wifi, LV_OBJ_FLAG_HIDDEN);
+  // Always visible: wifi asset while radio is on, calendar while radio sleeps.
+  const lv_img_dsc_t *src =
+      wifiConfigIsRadioOn() ? &ui_img_539372687  // icons-wifi
+                            : &ui_img_537441319; // icon-calendar
+  if (lv_img_get_src(ui_wifi) != src)
+    lv_img_set_src(ui_wifi, src);
+  lv_obj_clear_flag(ui_wifi, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void updateOutdoorWeatherUi() {
@@ -401,6 +430,50 @@ static void updateOutdoorWeatherUi() {
   setWeatherIcon(mainBuf);
 }
 
+enum class ClimateLevel { Low, Norm, High };
+
+static const uint32_t kBarDim = 0x222222;
+static const uint32_t kTempLowColor = 0x270CF1;
+static const uint32_t kTempNormColor = 0x07AAF6;
+static const uint32_t kTempHighColor = 0xF8381E;
+static const uint32_t kHumidLowColor = 0xFE9F00;
+static const uint32_t kHumidNormColor = 0x04FBA9;
+static const uint32_t kHumidHighColor = 0x0490F9;
+
+static ClimateLevel levelFromTemp(float t) {
+  if (t < 18.0f)
+    return ClimateLevel::Low;
+  if (t > 26.0f)
+    return ClimateLevel::High;
+  return ClimateLevel::Norm;
+}
+
+static ClimateLevel levelFromHumid(float h) {
+  if (h < 40.0f)
+    return ClimateLevel::Low;
+  if (h > 60.0f)
+    return ClimateLevel::High;
+  return ClimateLevel::Norm;
+}
+
+static void paintLevelBars(lv_obj_t *low, lv_obj_t *norm, lv_obj_t *high,
+                           ClimateLevel active, uint32_t cLow, uint32_t cNorm,
+                           uint32_t cHigh, bool hasValue) {
+  const uint32_t colors[3] = {
+      hasValue && active == ClimateLevel::Low ? cLow : kBarDim,
+      hasValue && active == ClimateLevel::Norm ? cNorm : kBarDim,
+      hasValue && active == ClimateLevel::High ? cHigh : kBarDim};
+  lv_obj_t *bars[3] = {low, norm, high};
+  for (int i = 0; i < 3; ++i) {
+    if (!bars[i])
+      continue;
+    lv_obj_set_style_bg_color(bars[i], lv_color_hex(colors[i]),
+                              kMain);
+    lv_obj_set_style_bg_opa(bars[i], LV_OPA_COVER,
+                            kMain);
+  }
+}
+
 static void updateClimateUi() {
   float t = 0, h = 0, p = 0;
   if (!bmeSensorRead(&t, &h, &p)) {
@@ -408,6 +481,11 @@ static void updateClimateUi() {
       lv_label_set_text(ui_temp, "--.-");
     if (ui_humid)
       lv_label_set_text(ui_humid, "--");
+    paintLevelBars(ui_temp_low, ui_temp_norm, ui_temp_high, ClimateLevel::Norm,
+                   kTempLowColor, kTempNormColor, kTempHighColor, false);
+    paintLevelBars(ui_humid_low, ui_humid_norm, ui_humid_high,
+                   ClimateLevel::Norm, kHumidLowColor, kHumidNormColor,
+                   kHumidHighColor, false);
     return;
   }
 
@@ -416,9 +494,12 @@ static void updateClimateUi() {
     snprintf(buf, sizeof(buf), "%.1f", (double)t);
     lv_label_set_text(ui_temp, buf);
   }
+  paintLevelBars(ui_temp_low, ui_temp_norm, ui_temp_high, levelFromTemp(t),
+                 kTempLowColor, kTempNormColor, kTempHighColor, true);
 
+  const bool humidOk = bmeSensorHasHumidity() && !isnan(h);
   if (ui_humid) {
-    if (!bmeSensorHasHumidity() || isnan(h))
+    if (!humidOk)
       lv_label_set_text(ui_humid, "--");
     else {
       char humBuf[8];
@@ -426,6 +507,9 @@ static void updateClimateUi() {
       lv_label_set_text(ui_humid, humBuf);
     }
   }
+  paintLevelBars(ui_humid_low, ui_humid_norm, ui_humid_high,
+                 humidOk ? levelFromHumid(h) : ClimateLevel::Norm,
+                 kHumidLowColor, kHumidNormColor, kHumidHighColor, humidOk);
 }
 
 static void blinkColon(const struct tm &localTm) {
@@ -442,6 +526,7 @@ static void blinkColon(const struct tm &localTm) {
 
 static void paintTime(const struct tm &localTm) {
   static int lastYday = -1;
+  static int lastHour = -1;
 
   setDigitPair(hhPair, localTm.tm_hour);
   setDigitPair(mmPair, localTm.tm_min);
@@ -459,6 +544,11 @@ static void paintTime(const struct tm &localTm) {
       lv_label_set_text(ui_wkday, wdBuf);
     }
     lastYday = localTm.tm_yday;
+  }
+  if (localTm.tm_hour != lastHour) {
+    lastHour = localTm.tm_hour;
+    // Swap Clear day/night icon at 06:00 / 18:00 without waiting for weather fetch.
+    refreshWeatherIconFromCache();
   }
   blinkColon(localTm);
 }
