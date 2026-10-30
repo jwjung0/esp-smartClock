@@ -145,15 +145,12 @@ src/weather_fetch.h/.cpp    # OpenWeather One Call 4.0 current (HTTPS)
 src/wifi_config.h/.cpp      # SoftAP/STA portal, NVS credentials
 src/time_sync.h/.cpp        # NTP (KST) + UI time/date formatters
 src/bme_sensor.h/.cpp       # BME280 I2C read
-src/loading_gif.h/.c        # embedded assets/loading.gif (regenerate via script)
-assets/loading.gif          # loading animation source
-scripts/embed_loading_gif.py  # python3 scripts/embed_loading_gif.py
 scripts/build.sh            # ./scripts/build.sh [board] [local|prod]
 scripts/flash.sh            # ./scripts/flash.sh [board] [local|prod]
 scripts/checkup.sh          # ./scripts/checkup.sh [board]
 ```
 
-On boot the app shows the SquareLine **loading** screen (animated GIF) while joining Wi‑Fi and syncing NTP, then switches to **home**.
+On boot the app shows the SquareLine **loading** screen while joining Wi‑Fi and syncing NTP, then switches to **home**.
 
 ## Board config
 
