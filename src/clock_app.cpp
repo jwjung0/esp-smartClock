@@ -31,6 +31,11 @@ static uint32_t nextNtpSyncMs = 0;
 static uint32_t nextClimateUiMs = 0;
 static bool bootConfigOpen = false;
 
+static void setBacklight(bool on) {
+  pinMode(PIN_TFT_BL, OUTPUT);
+  digitalWrite(PIN_TFT_BL, on ? HIGH : LOW);
+}
+
 // HH/MM/SS as two fixed-width digit cells (proportional fonts won't shift).
 struct DigitPair {
   lv_obj_t *tens;
@@ -327,6 +332,7 @@ static void showLoading(const char *status) {
   lv_disp_load_scr(ui_loading);
   onHomeScreen = false;
   lvglPump();
+  lv_refr_now(NULL); // full flush before backlight may turn on
 }
 
 // OpenWeather weather[0].main → SquareLine weather assets on ui_weather.
@@ -524,6 +530,10 @@ static void runDailyNtpSync() {
 }
 
 void clockAppSetup() {
+  // Hold backlight off before anything else — TFT_eSPI used to force it on
+  // during ST7789 init while GRAM was still white.
+  setBacklight(false);
+
   Serial.begin(115200);
   delay(500);
   Serial.println();
@@ -535,13 +545,6 @@ void clockAppSetup() {
   tft.begin();
   // Match working Adafruit checkup orientation on 240x240 ST7789.
   tft.setRotation(0);
-
-#ifdef TFT_BL
-  pinMode(TFT_BL, OUTPUT);
-  digitalWrite(TFT_BL, HIGH);
-#endif
-
-  // Prove TFT_eSPI is talking before LVGL takes over.
   tft.fillScreen(TFT_BLACK);
   Serial.printf("TFT setup %s  MOSI=%d SCLK=%d CS=%d DC=%d RST=%d BL=%d\n",
                 USER_SETUP_INFO, PIN_TFT_MOSI, PIN_TFT_SCLK, PIN_TFT_CS,
@@ -568,6 +571,7 @@ void clockAppSetup() {
   wifiConfigSetIdleCallback(lvglPump);
 
   showLoading("Connecting WiFi...");
+  setBacklight(true);
   Serial.println("UI init done (loading)");
 
   wifiConfigBegin();

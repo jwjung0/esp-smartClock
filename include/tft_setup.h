@@ -22,7 +22,8 @@
 #define TFT_CS   PIN_TFT_CS
 #define TFT_DC   PIN_TFT_DC
 #define TFT_RST  PIN_TFT_RST
-#define TFT_BL   PIN_TFT_BL
+// Do NOT define TFT_BL here — TFT_eSPI ST7789 init forces BL HIGH mid-init
+// (white flash). App owns PIN_TFT_BL and enables it only after a black frame.
 #define TFT_MISO -1
 
 // Many 1.54" IPS ST7789 panels need inversion to show a normal image.
