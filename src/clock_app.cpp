@@ -282,8 +282,8 @@ static void applyDarkTheme() {
   lv_disp_set_bg_opa(NULL, LV_OPA_COVER);
 
   if (ui_box1) {
-    lv_obj_set_style_border_color(ui_box1, lv_color_hex(0x222222), kMain);
-    lv_obj_set_style_radius(ui_box1, 2, kMain);
+    lv_obj_set_style_border_color(ui_box1, lv_color_hex(0x555555), kMain);
+    lv_obj_set_style_radius(ui_box1, 4, kMain);
   }
 
   if (ui_connect)
