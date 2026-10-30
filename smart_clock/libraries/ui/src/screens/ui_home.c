@@ -193,7 +193,7 @@ ui_icon_temp = lv_img_create(ui_home);
 lv_img_set_src(ui_icon_temp, &ui_img_icon_temp_png);
 lv_obj_set_width( ui_icon_temp, LV_SIZE_CONTENT);  /// 1
 lv_obj_set_height( ui_icon_temp, LV_SIZE_CONTENT);   /// 1
-lv_obj_set_x( ui_icon_temp, -100 );
+lv_obj_set_x( ui_icon_temp, -101 );
 lv_obj_set_y( ui_icon_temp, 74 );
 lv_obj_set_align( ui_icon_temp, LV_ALIGN_CENTER );
 lv_obj_add_flag( ui_icon_temp, LV_OBJ_FLAG_ADV_HITTEST );   /// Flags

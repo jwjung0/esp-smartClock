@@ -40,13 +40,11 @@ LV_IMG_DECLARE( ui_img_539372687);   // assets/icons-wifi.png
 LV_IMG_DECLARE( ui_img_575321948);   // assets/weather-clouds.png
 LV_IMG_DECLARE( ui_img_1433770785);   // assets/icons-humid.png
 LV_IMG_DECLARE( ui_img_icon_temp_png);   // assets/icon_temp.png
-LV_IMG_DECLARE( ui_img_2069605658);   // assets/humid-dry.png
-LV_IMG_DECLARE( ui_img_512097826);   // assets/temp-cold.png
-LV_IMG_DECLARE( ui_img_weather_clear_png);   // assets/weather_clear.png
 LV_IMG_DECLARE( ui_img_959432778);   // assets/weather-atmosphere.png
 LV_IMG_DECLARE( ui_img_579096672);   // assets/weather-rain.png
 LV_IMG_DECLARE( ui_img_2047004501);   // assets/weather-snow.png
 LV_IMG_DECLARE( ui_img_1449682034);   // assets/weather-thunder.png
+LV_IMG_DECLARE( ui_img_weather_clear_png);   // assets/weather_clear.png
 
 // FONTS
 LV_FONT_DECLARE( ui_font_orbitron_20);
