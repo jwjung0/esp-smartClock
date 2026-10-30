@@ -4,10 +4,10 @@ ESP32 digital clock with on-device temperature and humidity. Firmware is built a
 
 ## Hardware
 
-| Part                       | Role                     |
-| -------------------------- | ------------------------ |
-| MCU (pick one at build)    | Wi‑Fi; see boards below  |
-| 1.54" LCD (240×240 ST7789) | Time and sensor display  |
+| Part                       | Role                        |
+| -------------------------- | --------------------------- |
+| MCU (pick one at build)    | Wi‑Fi; see boards below     |
+| 1.54" LCD (240×240 ST7789) | Time and sensor display     |
 | BME280 or BMP280           | Climate (BMP280 = T+P only) |
 
 Supported boards (pin maps in `include/board_pins_*.h`):
@@ -53,17 +53,22 @@ Six-pin modules also have **CSB** / **SDO** (sometimes silk **CSR** / **SDK**). 
 - Clock UI on the 1.54" LCD (SquareLine / LVGL)
 - Wi‑Fi provisioning via local HTTP portal (SoftAP + STA)
 - NTP time sync in **KST (UTC+9)** → live `ui_time` / `ui_date`
-- Power policy: **10 min** config window after boot, then Wi‑Fi off; **daily** NTP resync; **every 10 min** climate data ingest (brief Wi‑Fi wake → POST → off)
+- Power policy: **10 min** config window after boot, then Wi‑Fi off; **daily** NTP resync; **every 10 min** climate data ingest (brief Wi‑Fi wake → POST → OpenWeather GET → off)
 - Climate ingest deploy targets: **local** (this Mac) vs **prod** (Ubuntu) via gitignored `include/ingest_config_*.h`
+- Live indoor T/RH from BME280 on `ui_temp*` / `ui_humid`
+- Outdoor weather via **OpenWeather Current Weather API 2.5** → `ui_current_temp`, `ui_current_humid`, image `ui_weather` (free-tier key; One Call 3.0/4.0 need a paid plan)
 
-**Planned**
+**SquareLine outdoor weather**
 
-- Live temperature and humidity from BME280 on the clock UI
+- Widgets: Image `ui_weather`, Labels `ui_current_temp` / `ui_current_humid` (+ `ui_current_celcus` / `ui_current_pct`)
+- Assets: `weather_clear`, `weather-clouds`, `weather-rain`, `weather-thunder`, `weather-snow`, `weather-atmosphere`. Firmware maps `weather[0].main` (`Rain`/`Drizzle` → rain, mist/fog/… → atmosphere, `Tornado` → thunder)
+- Create gitignored `include/weather_config.h` with `OPENWEATHER_API_KEY` and lat/lon (default Seoul-ish `37.49056` / `127.02`)
 
 **Checkup**
 
 - LCD color cycle + BL blink
 - BME280 over I2C — Serial prints pin map, probe `OK`/`FAIL`, then `T` / `RH` / `P` each loop
+- OpenWeather once at boot — STA from NVS (same credentials as app portal) → HTTPS `2.5/weather` → Serial + LCD (`T` / `RH` / `main`), then Wi‑Fi off. Needs `include/weather_config.h` and a prior app Wi‑Fi provision
 
 ## Wi‑Fi + NTP setup
 
@@ -75,7 +80,8 @@ Six-pin modules also have **CSB** / **SDO** (sometimes silk **CSR** / **SDK**). 
 6. SoftAP setup stays **http://192.168.4.1/**.
 7. Portal stays up for **10 minutes after boot**, then Wi‑Fi turns off. Power-cycle for another config window.
 8. NTP resyncs about **once per day** (brief Wi‑Fi wake, then off again). Time zone: **KST**.
-9. After the config window, climate readings POST about **every 10 minutes** (Wi‑Fi on → POST → off). Set URL/token in gitignored `include/ingest_config_local.h` / `include/ingest_config_prod.h`.
+9. After the config window, climate readings POST about **every 10 minutes** (Wi‑Fi on → POST → OpenWeather GET → off). Set URL/token in gitignored `include/ingest_config_local.h` / `include/ingest_config_prod.h`.
+10. Same wake fetches outdoor weather (HTTPS, `units=metric`). Set the API key in gitignored `include/weather_config.h`.
 
 Credentials are stored in NVS (`Preferences` namespace `wifi`).
 
@@ -96,7 +102,7 @@ Selected at **compile time** in `platformio.ini`.
 
 ## Working flow
 
-1. Edit firmware in Cursor (`src/`, `include/ingest_config_*.h`, `platformio.ini`).
+1. Edit firmware in Cursor (`src/`, `include/ingest_config_*.h`, `include/weather_config.h`, `platformio.ini`).
 2. Install PlatformIO Core on your machine (once):
    ```bash
    brew install platformio
@@ -130,10 +136,12 @@ First `pio run` downloads the ESP32 platform and toolchain automatically.
 platformio.ini              # envs: app_<board>_<local|prod>, checkup_<board>
 include/board_pins_*.h      # per-board LCD / BME280 / LED pins
 include/ingest_config_*.h   # local vs prod URL/token (gitignored)
+include/weather_config.h    # OpenWeather API key + lat/lon (gitignored)
 src/main.cpp                # setup/loop — switches on FIRMWARE_MODE_*
 src/board_check.h/.cpp      # LED + serial smoke test
 src/clock_app.h/.cpp        # LVGL clock app
 src/data_ingest.h/.cpp      # BME280 → HTTP climate ingest (10 min wake)
+src/weather_fetch.h/.cpp    # OpenWeather One Call 4.0 current (HTTPS)
 src/wifi_config.h/.cpp      # SoftAP/STA portal, NVS credentials
 src/time_sync.h/.cpp        # NTP (KST) + UI time/date formatters
 src/bme_sensor.h/.cpp       # BME280 I2C read

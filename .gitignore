@@ -10,3 +10,6 @@ compile_commands.json
 # Ingest URL / device token (local only)
 include/ingest_config_local.h
 include/ingest_config_prod.h
+
+# OpenWeather API key (local only)
+include/weather_config.h

@@ -45,11 +45,15 @@ void timeSyncFormatTime(const struct tm &t, char *buf, size_t len) {
 }
 
 void timeSyncFormatDate(const struct tm &t, char *buf, size_t len) {
+  snprintf(buf, len, "%02d.%02d.%02d", (t.tm_year + 1900) % 100, t.tm_mon + 1,
+           t.tm_mday);
+}
+
+void timeSyncFormatWeekday(const struct tm &t, char *buf, size_t len) {
   static const char *kDow[] = {"SUN", "MON", "TUE", "WED",
                                "THU", "FRI", "SAT"};
   const int wday = (t.tm_wday >= 0 && t.tm_wday < 7) ? t.tm_wday : 0;
-  snprintf(buf, len, "%04d %02d/%02d %s", t.tm_year + 1900, t.tm_mon + 1,
-           t.tm_mday, kDow[wday]);
+  snprintf(buf, len, "%s", kDow[wday]);
 }
 
 #else
@@ -64,6 +68,10 @@ void timeSyncFormatTime(const struct tm & /*t*/, char *buf, size_t len) {
     buf[0] = '\0';
 }
 void timeSyncFormatDate(const struct tm & /*t*/, char *buf, size_t len) {
+  if (len)
+    buf[0] = '\0';
+}
+void timeSyncFormatWeekday(const struct tm & /*t*/, char *buf, size_t len) {
   if (len)
     buf[0] = '\0';
 }

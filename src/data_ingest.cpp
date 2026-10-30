@@ -3,6 +3,7 @@
 #if defined(FIRMWARE_MODE_APP)
 
 #include "bme_sensor.h"
+#include "weather_fetch.h"
 #include "wifi_config.h"
 
 #include <HTTPClient.h>
@@ -113,6 +114,8 @@ void dataIngestLoop(bool allowRadioOff) {
   float t = 0, h = 0, p = 0;
   const bool sensorOk = bmeSensorRead(&t, &h, &p);
   const bool postOk = postReading(sensorOk, t, h);
+  // Same Wi‑Fi session: outdoor OpenWeather after indoor ingest POST.
+  const bool weatherOk = weatherFetchOnce();
 
   if (postOk && sensorOk) {
     scheduleNext(false);
@@ -130,6 +133,11 @@ void dataIngestLoop(bool allowRadioOff) {
       Serial.println("data ingest HTTP failed (sensor null); retry soon");
     else
       Serial.println("data ingest HTTP failed; retry soon");
+  }
+
+  if (!weatherOk && postOk && sensorOk) {
+    // Keep 10 min cadence for ingest success; weather retries next wake.
+    Serial.println("weather fetch failed; will retry on next ingest wake");
   }
 
   if (allowRadioOff) {

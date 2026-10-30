@@ -7,6 +7,7 @@
 #include "bme_sensor.h"
 #include "data_ingest.h"
 #include "time_sync.h"
+#include "weather_fetch.h"
 #include "wifi_config.h"
 
 #include <lvgl.h>
@@ -18,7 +19,7 @@ static const uint16_t kScreenH = 240;
 static const uint32_t kNtpWaitMs = 15000;
 static const uint32_t kBootConfigMs = 10UL * 60UL * 1000UL;   // portal window
 static const uint32_t kDailySyncMs = 24UL * 60UL * 60UL * 1000UL;
-static const uint32_t kClimateUiMs = 5000; // refresh ui_temp1 / ui_temp2 from BMx280
+static const uint32_t kClimateUiMs = 5000; // refresh ui_temp / ui_humid from BMx280
 
 static lv_disp_draw_buf_t draw_buf;
 static lv_color_t buf[kScreenW * kScreenH / 10];
@@ -60,10 +61,13 @@ static void my_touchpad_read(lv_indev_drv_t * /*indev_driver*/,
 }
 
 static void applyClockColors() {
-  // Portal "clock" color → HH / MM / colon dots.
+  // Portal "clock" color → HH / MM / colon dots; "date" → date + weekday.
   const lv_color_t clock = lv_color_hex(wifiConfigClockColor());
-  lv_obj_set_style_text_color(ui_date, lv_color_hex(wifiConfigDateColor()),
-                              LV_PART_MAIN | LV_STATE_DEFAULT);
+  const lv_color_t date = lv_color_hex(wifiConfigDateColor());
+  if (ui_date)
+    lv_obj_set_style_text_color(ui_date, date, LV_PART_MAIN | LV_STATE_DEFAULT);
+  if (ui_wkday)
+    lv_obj_set_style_text_color(ui_wkday, date, LV_PART_MAIN | LV_STATE_DEFAULT);
   for (lv_obj_t *d : {hhPair.tens, hhPair.ones, mmPair.tens, mmPair.ones}) {
     if (d)
       lv_obj_set_style_text_color(d, clock, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -216,52 +220,6 @@ static void fixDigitLabelWidth(lv_obj_t *label, uint8_t glyphCount,
   lv_obj_set_style_text_align(label, align, LV_PART_MAIN);
 }
 
-// Lock widths, then place dot exactly midway between int and frac (equal gaps).
-static void layoutTempCluster() {
-  static const char kDigits[] = "0123456789";
-  static const char kTempInt[] = "0123456789-";
-  static const lv_coord_t kGap = 2; // equal space: int | gap | . | gap | frac
-
-  if (!ui_temp1 || !ui_temp2 || !ui_tempdot)
-    return;
-
-  fixDigitLabelWidth(ui_temp1, 2, kTempInt, LV_TEXT_ALIGN_RIGHT);
-  fixDigitLabelWidth(ui_temp2, 1, kDigits, LV_TEXT_ALIGN_CENTER);
-
-  const lv_font_t *dotFont =
-      lv_obj_get_style_text_font(ui_tempdot, LV_PART_MAIN);
-  lv_coord_t dotW = 2;
-  if (dotFont) {
-    const lv_coord_t glyph =
-        lv_txt_get_width(".", 1, dotFont, 0, LV_TEXT_FLAG_NONE) + 2;
-    dotW = glyph / 2;
-    if (dotW < 2)
-      dotW = 2;
-  }
-  lv_label_set_text(ui_tempdot, ".");
-  lv_label_set_long_mode(ui_tempdot, LV_LABEL_LONG_CLIP);
-  lv_obj_set_width(ui_tempdot, dotW);
-  lv_obj_set_style_text_align(ui_tempdot, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-  lv_obj_set_style_text_opa(ui_tempdot, LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_clear_flag(ui_tempdot, LV_OBJ_FLAG_HIDDEN);
-
-  // Style offsets only (ALIGN_CENTER) — never lv_obj_get_x after layout.
-  const lv_coord_t t1x = lv_obj_get_style_x(ui_temp1, LV_PART_MAIN);
-  const lv_coord_t t1w = lv_obj_get_style_width(ui_temp1, LV_PART_MAIN);
-  const lv_coord_t t2w = lv_obj_get_style_width(ui_temp2, LV_PART_MAIN);
-  const lv_coord_t dotY = lv_obj_get_style_y(ui_tempdot, LV_PART_MAIN);
-  const lv_coord_t t2y = lv_obj_get_style_y(ui_temp2, LV_PART_MAIN);
-
-  const lv_coord_t intRight = t1x + t1w / 2;
-  const lv_coord_t dotX = intRight + kGap + dotW / 2;
-  const lv_coord_t t2x = dotX + dotW / 2 + kGap + t2w / 2;
-
-  lv_obj_align(ui_tempdot, LV_ALIGN_CENTER, dotX, dotY);
-  lv_obj_align(ui_temp2, LV_ALIGN_CENTER, t2x, t2y);
-  lv_obj_move_foreground(ui_tempdot);
-  lv_obj_move_foreground(ui_temp2);
-}
-
 static void fixNumericLabelWidths() {
   static const char kDigits[] = "0123456789";
 
@@ -272,14 +230,15 @@ static void fixNumericLabelWidths() {
   setupDigitPair(&ssPair, ui_ss1);
   setupColonDots();
 
-  layoutTempCluster();
+  // Keep ui_temp / ui_current_temp as SIZE_CONTENT — forcing a wide box with
+  // LV_ALIGN_CENTER grows both edges and overlaps the fixed °C labels.
   fixDigitLabelWidth(ui_humid, 2, kDigits, LV_TEXT_ALIGN_CENTER);
+  fixDigitLabelWidth(ui_current_humid, 2, kDigits, LV_TEXT_ALIGN_CENTER);
 
-  // Date: reserve width for a worst-case string so day/month changes don't jump.
   if (ui_date) {
     const lv_font_t *font = lv_obj_get_style_text_font(ui_date, LV_PART_MAIN);
     if (font) {
-      const char *sample = "0000 00/00 WWW";
+      const char *sample = "00.00.00";
       const lv_coord_t w =
           lv_txt_get_width(sample, strlen(sample), font, 0, LV_TEXT_FLAG_NONE) +
           4;
@@ -289,11 +248,23 @@ static void fixNumericLabelWidths() {
       lv_obj_set_style_text_align(ui_date, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     }
   }
+  if (ui_wkday) {
+    const lv_font_t *font = lv_obj_get_style_text_font(ui_wkday, LV_PART_MAIN);
+    if (font) {
+      const char *sample = "WWW";
+      const lv_coord_t w =
+          lv_txt_get_width(sample, strlen(sample), font, 0, LV_TEXT_FLAG_NONE) +
+          4;
+      lv_label_set_long_mode(ui_wkday, LV_LABEL_LONG_CLIP);
+      lv_obj_set_style_min_width(ui_wkday, w, LV_PART_MAIN);
+      lv_obj_set_width(ui_wkday, w);
+      lv_obj_set_style_text_align(ui_wkday, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    }
+  }
 }
 
 static void applyDarkTheme() {
   const lv_color_t white = lv_color_hex(0xFFFFFF);
-  const lv_color_t line = lv_color_hex(0x333333);
 
   styleSolidBlack(ui_home);
   styleSolidBlack(ui_loading);
@@ -303,14 +274,8 @@ static void applyDarkTheme() {
   if (ui_connect)
     lv_obj_set_style_text_color(ui_connect, white,
                                 LV_PART_MAIN | LV_STATE_DEFAULT);
-  if (ui_temp1)
-    lv_obj_set_style_text_color(ui_temp1, white,
-                                LV_PART_MAIN | LV_STATE_DEFAULT);
-  if (ui_temp2)
-    lv_obj_set_style_text_color(ui_temp2, white,
-                                LV_PART_MAIN | LV_STATE_DEFAULT);
-  if (ui_tempdot)
-    lv_obj_set_style_text_color(ui_tempdot, white,
+  if (ui_temp)
+    lv_obj_set_style_text_color(ui_temp, white,
                                 LV_PART_MAIN | LV_STATE_DEFAULT);
   if (ui_humid)
     lv_obj_set_style_text_color(ui_humid, white,
@@ -320,14 +285,18 @@ static void applyDarkTheme() {
                                 LV_PART_MAIN | LV_STATE_DEFAULT);
   if (ui_pct)
     lv_obj_set_style_text_color(ui_pct, white, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-  for (lv_obj_t *bar : {ui_hline, ui_vline}) {
-    if (!bar)
-      continue;
-    lv_obj_set_style_bg_color(bar, line, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_width(bar, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-  }
+  if (ui_current_temp)
+    lv_obj_set_style_text_color(ui_current_temp, white,
+                                LV_PART_MAIN | LV_STATE_DEFAULT);
+  if (ui_current_humid)
+    lv_obj_set_style_text_color(ui_current_humid, white,
+                                LV_PART_MAIN | LV_STATE_DEFAULT);
+  if (ui_current_celcus)
+    lv_obj_set_style_text_color(ui_current_celcus, white,
+                                LV_PART_MAIN | LV_STATE_DEFAULT);
+  if (ui_current_pct)
+    lv_obj_set_style_text_color(ui_current_pct, white,
+                                LV_PART_MAIN | LV_STATE_DEFAULT);
 
   fixNumericLabelWidths();
 }
@@ -360,61 +329,87 @@ static void showLoading(const char *status) {
   lvglPump();
 }
 
-// Temp icons: cold <18°C, hot ≥28°C, else moderate.
-static void setTempIcon(float tC) {
-  if (!ui_icon_temp)
+// OpenWeather weather[0].main → SquareLine weather assets on ui_weather.
+static void setWeatherIcon(const char *main) {
+  if (!ui_weather)
     return;
-  const lv_img_dsc_t *src = &ui_img_206214294; // temp-norm
-  if (tC < 18.0f)
-    src = &ui_img_512097826; // temp-cold
-  else if (tC >= 28.0f)
-    src = &ui_img_1523773831; // temp-hot
-  if (lv_img_get_src(ui_icon_temp) != src)
-    lv_img_set_src(ui_icon_temp, src);
+  const lv_img_dsc_t *src = &ui_img_575321948; // weather-clouds
+  if (main && main[0]) {
+    if (strcmp(main, "Clear") == 0)
+      src = &ui_img_weather_clear_png;
+    else if (strcmp(main, "Clouds") == 0)
+      src = &ui_img_575321948;
+    else if (strcmp(main, "Rain") == 0 || strcmp(main, "Drizzle") == 0)
+      src = &ui_img_579096672; // weather-rain
+    else if (strcmp(main, "Thunderstorm") == 0)
+      src = &ui_img_1449682034; // weather-thunder
+    else if (strcmp(main, "Snow") == 0)
+      src = &ui_img_2047004501; // weather-snow
+    else if (strcmp(main, "Tornado") == 0)
+      src = &ui_img_1449682034; // no extreme asset — reuse thunder
+    else if (strcmp(main, "Mist") == 0 || strcmp(main, "Smoke") == 0 ||
+             strcmp(main, "Haze") == 0 || strcmp(main, "Dust") == 0 ||
+             strcmp(main, "Fog") == 0 || strcmp(main, "Sand") == 0 ||
+             strcmp(main, "Ash") == 0 || strcmp(main, "Squall") == 0)
+      src = &ui_img_959432778; // weather-atmosphere
+  }
+  if (lv_img_get_src(ui_weather) != src)
+    lv_img_set_src(ui_weather, src);
 }
 
-// Humid icons: dry <40%, wet ≥60%, else moderate.
-static void setHumidIcon(float rhPct) {
-  if (!ui_icon_humid)
+static void updateWifiIcon() {
+  if (!ui_wifi)
     return;
-  const lv_img_dsc_t *src = &ui_img_1873335833; // humid-norm
-  if (rhPct < 40.0f)
-    src = &ui_img_2069605658; // humid-dry
-  else if (rhPct >= 60.0f)
-    src = &ui_img_5094081; // humid-wet
-  if (lv_img_get_src(ui_icon_humid) != src)
-    lv_img_set_src(ui_icon_humid, src);
+  if (wifiConfigIsRadioOn())
+    lv_obj_clear_flag(ui_wifi, LV_OBJ_FLAG_HIDDEN);
+  else
+    lv_obj_add_flag(ui_wifi, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void updateOutdoorWeatherUi() {
+  float t = 0, h = 0;
+  char mainBuf[16];
+  if (!weatherFetchGet(&t, &h, mainBuf, sizeof(mainBuf))) {
+    if (ui_current_temp)
+      lv_label_set_text(ui_current_temp, "--");
+    if (ui_current_humid)
+      lv_label_set_text(ui_current_humid, "--");
+    setWeatherIcon(nullptr);
+    return;
+  }
+
+  if (ui_current_temp) {
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%.0f", (double)t);
+    lv_label_set_text(ui_current_temp, buf);
+  }
+  if (ui_current_humid) {
+    if (isnan(h))
+      lv_label_set_text(ui_current_humid, "--");
+    else {
+      char buf[16];
+      snprintf(buf, sizeof(buf), "%.0f", (double)h);
+      lv_label_set_text(ui_current_humid, buf);
+    }
+  }
+  setWeatherIcon(mainBuf);
 }
 
 static void updateClimateUi() {
   float t = 0, h = 0, p = 0;
   if (!bmeSensorRead(&t, &h, &p)) {
-    if (ui_temp1)
-      lv_label_set_text(ui_temp1, "--");
-    if (ui_temp2)
-      lv_label_set_text(ui_temp2, "-");
+    if (ui_temp)
+      lv_label_set_text(ui_temp, "--.-");
     if (ui_humid)
       lv_label_set_text(ui_humid, "--");
     return;
   }
 
-  // Round to 1 decimal, then split: ui_temp1=int, ui_temp2=one digit (dot is ui_tempdot).
-  const int tenths = (int)lroundf(t * 10.0f);
-  const int whole = tenths / 10;
-  int frac = tenths % 10;
-  if (frac < 0)
-    frac = -frac;
-
-  char intBuf[16];
-  char fracBuf[4];
-  snprintf(intBuf, sizeof(intBuf), "%d", whole);
-  snprintf(fracBuf, sizeof(fracBuf), "%d", frac);
-
-  if (ui_temp1)
-    lv_label_set_text(ui_temp1, intBuf);
-  if (ui_temp2)
-    lv_label_set_text(ui_temp2, fracBuf);
-  setTempIcon(t);
+  if (ui_temp) {
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%.1f", (double)t);
+    lv_label_set_text(ui_temp, buf);
+  }
 
   if (ui_humid) {
     if (!bmeSensorHasHumidity() || isnan(h))
@@ -423,7 +418,6 @@ static void updateClimateUi() {
       char humBuf[8];
       snprintf(humBuf, sizeof(humBuf), "%d", (int)lroundf(h));
       lv_label_set_text(ui_humid, humBuf);
-      setHumidIcon(h);
     }
   }
 }
@@ -447,10 +441,17 @@ static void paintTime(const struct tm &localTm) {
   setDigitPair(mmPair, localTm.tm_min);
   setDigitPair(ssPair, localTm.tm_sec);
 
-  if (ui_date && localTm.tm_yday != lastYday) {
-    char dateBuf[32];
-    timeSyncFormatDate(localTm, dateBuf, sizeof(dateBuf));
-    lv_label_set_text(ui_date, dateBuf);
+  if (localTm.tm_yday != lastYday) {
+    if (ui_date) {
+      char dateBuf[16];
+      timeSyncFormatDate(localTm, dateBuf, sizeof(dateBuf));
+      lv_label_set_text(ui_date, dateBuf);
+    }
+    if (ui_wkday) {
+      char wdBuf[8];
+      timeSyncFormatWeekday(localTm, wdBuf, sizeof(wdBuf));
+      lv_label_set_text(ui_wkday, wdBuf);
+    }
     lastYday = localTm.tm_yday;
   }
   blinkColon(localTm);
@@ -462,6 +463,8 @@ static void showHome() {
   if (timeSyncGet(&localTm))
     paintTime(localTm);
   updateClimateUi();
+  updateOutdoorWeatherUi();
+  updateWifiIcon();
   nextClimateUiMs = millis() + kClimateUiMs;
   lv_disp_load_scr(ui_home);
   onHomeScreen = true;
@@ -486,6 +489,7 @@ static void closeBootConfigWindow() {
     return;
   bootConfigOpen = false;
   wifiConfigRadioOff();
+  updateWifiIcon();
   Serial.println("Boot config window closed (10 min)");
 }
 
@@ -514,6 +518,7 @@ static void runDailyNtpSync() {
   }
 
   wifiConfigRadioOff();
+  updateWifiIcon();
   nextNtpSyncMs = millis() + kDailySyncMs;
   Serial.println("Daily NTP sync done; WiFi off");
 }
@@ -586,6 +591,12 @@ void clockAppSetup() {
     Serial.println("Boot config window: 10 min (then WiFi off)");
 
   bmeSensorBegin();
+  weatherFetchBegin();
+  // Fetch outdoor weather now while STA is still up (do not wait for 15s ingest).
+  if (wifiConfigIsConnected()) {
+    showLoading("Fetching weather...");
+    weatherFetchOnce();
+  }
   dataIngestBegin();
 
   showHome();
@@ -622,6 +633,10 @@ void clockAppLoop() {
   }
 
   dataIngestLoop(!bootConfigOpen);
+  if (onHomeScreen && weatherFetchTakeUpdated())
+    updateOutdoorWeatherUi();
+  if (onHomeScreen)
+    updateWifiIcon();
 
   delay(5);
 }

@@ -13,4 +13,7 @@ bool timeSyncGet(struct tm *out);
 bool timeSyncTick(struct tm *out);
 
 void timeSyncFormatTime(const struct tm &t, char *buf, size_t len);
+// ui_date: "YY.MM.DD"
 void timeSyncFormatDate(const struct tm &t, char *buf, size_t len);
+// ui_wkday: "MON"…"SUN"
+void timeSyncFormatWeekday(const struct tm &t, char *buf, size_t len);

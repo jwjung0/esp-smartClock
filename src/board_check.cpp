@@ -4,11 +4,14 @@
 
 #include "bme_sensor.h"
 #include "board_pins.h"
+#include "weather_fetch.h"
 
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7789.h>
 #include <Arduino.h>
+#include <Preferences.h>
 #include <SPI.h>
+#include <WiFi.h>
 
 static const int LED_PIN = BOARD_LED_PIN;
 static const unsigned long STEP_MS = 1200;
@@ -49,6 +52,91 @@ static void bmeCheckOnce() {
     return;
   }
   bmeSensorPrint();
+}
+
+// Use NVS credentials saved by the app SoftAP portal (namespace wifi).
+static bool wifiConnectFromNvs(uint32_t timeoutMs) {
+  Preferences prefs;
+  if (!prefs.begin("wifi", true)) {
+    Serial.println("OpenWeather: NVS wifi ns missing — flash app + provision first");
+    return false;
+  }
+  const String ssid = prefs.getString("ssid", "");
+  const String pass = prefs.getString("pass", "");
+  prefs.end();
+
+  if (ssid.isEmpty()) {
+    Serial.println("OpenWeather: no saved SSID — run app portal once");
+    return false;
+  }
+
+  Serial.printf("OpenWeather: WiFi STA → %s …\n", ssid.c_str());
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid.c_str(), pass.c_str());
+  const uint32_t t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && (millis() - t0) < timeoutMs) {
+    delay(250);
+    Serial.print('.');
+  }
+  Serial.println();
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("OpenWeather: WiFi join FAIL");
+    return false;
+  }
+  Serial.printf("OpenWeather: WiFi OK  IP=%s\n",
+                WiFi.localIP().toString().c_str());
+  return true;
+}
+
+static void lcdShowWeather(bool ok, float tC, float rh, const char *main) {
+  if (!lcdReady)
+    return;
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(2);
+  tft.setCursor(8, 40);
+  if (!ok) {
+    tft.print("OW FAIL");
+    tft.setCursor(8, 80);
+    tft.print("see Serial");
+    return;
+  }
+  tft.print("OpenWeather");
+  tft.setCursor(8, 80);
+  tft.printf("T %.1f C", tC);
+  tft.setCursor(8, 110);
+  if (isnan(rh))
+    tft.print("RH --");
+  else
+    tft.printf("RH %.0f %%", rh);
+  tft.setCursor(8, 140);
+  tft.printf("%s", main && main[0] ? main : "?");
+  tft.drawRect(0, 0, kScreenW, kScreenH, ST77XX_CYAN);
+}
+
+static void openWeatherCheckOnce() {
+  Serial.println();
+  Serial.println("OpenWeather probe (2.5 /weather)…");
+  weatherFetchBegin();
+  if (!wifiConnectFromNvs(20000)) {
+    lcdShowWeather(false, 0, 0, nullptr);
+    Serial.println("OpenWeather test FAIL — WiFi");
+    return;
+  }
+  const bool ok = weatherFetchOnce();
+  float t = 0, h = 0;
+  char mainBuf[16] = "";
+  if (ok)
+    weatherFetchGet(&t, &h, mainBuf, sizeof(mainBuf));
+  lcdShowWeather(ok, t, h, mainBuf);
+  if (ok)
+    Serial.println("OpenWeather test OK — see LCD + Serial line above");
+  else
+    Serial.println("OpenWeather test FAIL — check weather_config.h / API key");
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  Serial.println("OpenWeather: WiFi off");
+  Serial.println();
 }
 
 static void blinkBacklight() {
@@ -119,6 +207,11 @@ void boardCheckSetup() {
   printLcdPins();
   blinkBacklight();
   lcdReady = lcdBegin();
+
+  // After LCD is up so pass/fail can paint on glass.
+  openWeatherCheckOnce();
+  // Hold weather screen briefly before color cycle resumes.
+  delay(4000);
   Serial.println();
 }
 
