@@ -20,6 +20,8 @@ static const uint32_t kNtpWaitMs = 15000;
 static const uint32_t kBootConfigMs = 10UL * 60UL * 1000UL;   // portal window
 static const uint32_t kDailySyncMs = 24UL * 60UL * 60UL * 1000UL;
 static const uint32_t kClimateUiMs = 5000; // refresh ui_temp / ui_humid from BMx280
+static const uint32_t kProgressAnimMs = 500;
+static const uint32_t kCreepIntervalMs = 60;
 
 static lv_disp_draw_buf_t draw_buf;
 static lv_color_t buf[kScreenW * kScreenH / 10];
@@ -30,6 +32,8 @@ static uint32_t bootConfigUntilMs = 0;
 static uint32_t nextNtpSyncMs = 0;
 static uint32_t nextClimateUiMs = 0;
 static bool bootConfigOpen = false;
+static int loadingCreepCeiling = 0;
+static uint32_t lastCreepMs = 0;
 
 static void setBacklight(bool on) {
   pinMode(PIN_TFT_BL, OUTPUT);
@@ -39,6 +43,9 @@ static void setBacklight(bool on) {
 // Cast before | — LV_PART_* and LV_STATE_* are different enums (GCC warning).
 static const lv_style_selector_t kMain =
     static_cast<lv_style_selector_t>(LV_PART_MAIN) |
+    static_cast<lv_style_selector_t>(LV_STATE_DEFAULT);
+static const lv_style_selector_t kIndicator =
+    static_cast<lv_style_selector_t>(LV_PART_INDICATOR) |
     static_cast<lv_style_selector_t>(LV_STATE_DEFAULT);
 
 // HH/MM/SS as two fixed-width digit cells (proportional fonts won't shift).
@@ -289,6 +296,18 @@ static void applyDarkTheme() {
   if (ui_connect)
     lv_obj_set_style_text_color(ui_connect, white,
                                 kMain);
+  if (ui_progress) {
+    lv_obj_set_style_bg_color(ui_progress, lv_color_hex(0x333333), kMain);
+    lv_obj_set_style_bg_opa(ui_progress, LV_OPA_COVER, kMain);
+    lv_obj_set_style_radius(ui_progress, 4, kMain);
+    lv_obj_set_style_anim_time(ui_progress, kProgressAnimMs, kMain);
+    lv_obj_set_style_bg_color(ui_progress, lv_color_hex(0xFDDF03),
+                              kIndicator);
+    lv_obj_set_style_bg_opa(ui_progress, LV_OPA_COVER, kIndicator);
+    lv_obj_set_style_radius(ui_progress, 4, kIndicator);
+    lv_bar_set_range(ui_progress, 0, 100);
+    lv_bar_set_value(ui_progress, 0, LV_ANIM_OFF);
+  }
   if (ui_temp)
     lv_obj_set_style_text_color(ui_temp, white,
                                 kMain);
@@ -321,6 +340,47 @@ static void lvglPump() {
   delay(5);
 }
 
+static void setLoadingProgress(int value, bool anim) {
+  if (!ui_progress)
+    return;
+  if (value < 0)
+    value = 0;
+  if (value > 100)
+    value = 100;
+  lv_bar_set_value(ui_progress, value, anim ? LV_ANIM_ON : LV_ANIM_OFF);
+}
+
+static void setLoadingCreepCeiling(int ceiling) {
+  loadingCreepCeiling = ceiling;
+  lastCreepMs = 0;
+}
+
+static void loadingCreepTick() {
+  if (!ui_progress || loadingCreepCeiling <= 0)
+    return;
+  const uint32_t now = millis();
+  if (lastCreepMs != 0 && (now - lastCreepMs) < kCreepIntervalMs)
+    return;
+  lastCreepMs = now;
+
+  const int cur = lv_bar_get_value(ui_progress);
+  if (cur >= loadingCreepCeiling)
+    return;
+
+  int next = cur + 1;
+  if (next > loadingCreepCeiling)
+    next = loadingCreepCeiling;
+  // Hold under 100 until boot finishes.
+  if (loadingCreepCeiling < 100 && next > 99)
+    next = 99;
+  lv_bar_set_value(ui_progress, next, LV_ANIM_ON);
+}
+
+static void loadingPump() {
+  loadingCreepTick();
+  lvglPump();
+}
+
 static void updateLoadingIp() {
   if (!ui_ipaddr)
     return;
@@ -341,7 +401,7 @@ static void showLoading(const char *status) {
   updateLoadingIp();
   lv_disp_load_scr(ui_loading);
   onHomeScreen = false;
-  lvglPump();
+  loadingPump();
   lv_refr_now(NULL); // full flush before backlight may turn on
 }
 
@@ -569,11 +629,15 @@ static void showHome() {
 
 static void waitForNtp() {
   showLoading("Syncing time...");
+  setLoadingProgress(40, true);
+  setLoadingCreepCeiling(70);
   const uint32_t start = millis();
   while (!timeSyncIsReady() && (millis() - start) < kNtpWaitMs) {
     wifiConfigLoop();
-    lvglPump();
+    loadingPump();
   }
+  setLoadingProgress(75, true);
+  setLoadingCreepCeiling(0);
   if (timeSyncIsReady())
     Serial.println("NTP sync OK");
   else
@@ -658,24 +722,32 @@ void clockAppSetup() {
 
   ui_init();
   applyDarkTheme();
-  wifiConfigSetIdleCallback(lvglPump);
+  // Creep progress during STA connect waits inside wifiConfigBegin.
+  wifiConfigSetIdleCallback(loadingPump);
 
   showLoading("Connecting WiFi...");
+  setLoadingProgress(5, false);
+  setLoadingCreepCeiling(35);
   setBacklight(true);
   Serial.println("UI init done (loading)");
 
   wifiConfigBegin();
   updateLoadingIp(); // STA or SoftAP IP once WiFi is up
-  lvglPump();
+  setLoadingProgress(40, true);
+  setLoadingCreepCeiling(0);
+  loadingPump();
 
   if (wifiConfigIsConnected()) {
     timeSyncBegin();
     waitForNtp();
   } else {
     showLoading("WiFi setup mode");
+    setLoadingProgress(40, true);
+    setLoadingCreepCeiling(40);
     const uint32_t t0 = millis();
     while (millis() - t0 < 1500)
-      lvglPump();
+      loadingPump();
+    setLoadingCreepCeiling(0);
   }
 
   bootConfigOpen = wifiConfigIsRadioOn();
@@ -689,9 +761,20 @@ void clockAppSetup() {
   // Fetch outdoor weather now while STA is still up (do not wait for 15s ingest).
   if (wifiConfigIsConnected()) {
     showLoading("Fetching weather...");
+    setLoadingProgress(75, true);
+    setLoadingCreepCeiling(95);
+    const uint32_t weatherUiStart = millis();
+    while (millis() - weatherUiStart < 400)
+      loadingPump();
     weatherFetchOnce();
   }
   dataIngestBegin();
+
+  setLoadingProgress(100, true);
+  setLoadingCreepCeiling(0);
+  const uint32_t doneStart = millis();
+  while (millis() - doneStart < 350)
+    loadingPump();
 
   showHome();
   Serial.println("Home screen");

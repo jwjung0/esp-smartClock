@@ -5,7 +5,7 @@
 
 #include "../ui.h"
 
-lv_obj_t *ui_loading = NULL;lv_obj_t *ui_connect = NULL;lv_obj_t *ui_ipaddr = NULL;
+lv_obj_t *ui_loading = NULL;lv_obj_t *ui_connect = NULL;lv_obj_t *ui_ipaddr = NULL;lv_obj_t *ui_progress = NULL;
 // event funtions
 
 // build funtions
@@ -18,6 +18,8 @@ lv_obj_clear_flag( ui_loading, LV_OBJ_FLAG_SCROLLABLE );    /// Flags
 ui_connect = lv_label_create(ui_loading);
 lv_obj_set_width( ui_connect, LV_SIZE_CONTENT);  /// 1
 lv_obj_set_height( ui_connect, LV_SIZE_CONTENT);   /// 1
+lv_obj_set_x( ui_connect, -1 );
+lv_obj_set_y( ui_connect, -25 );
 lv_obj_set_align( ui_connect, LV_ALIGN_CENTER );
 lv_label_set_text(ui_connect,"Connecting WiFi...");
 lv_obj_set_style_text_font(ui_connect, &lv_font_montserrat_18, LV_PART_MAIN| LV_STATE_DEFAULT);
@@ -35,6 +37,15 @@ lv_obj_set_style_text_letter_space(ui_ipaddr, 3, LV_PART_MAIN| LV_STATE_DEFAULT)
 lv_obj_set_style_text_line_space(ui_ipaddr, 0, LV_PART_MAIN| LV_STATE_DEFAULT);
 lv_obj_set_style_text_font(ui_ipaddr, &lv_font_montserrat_16, LV_PART_MAIN| LV_STATE_DEFAULT);
 
+ui_progress = lv_bar_create(ui_loading);
+lv_bar_set_value(ui_progress,10,LV_ANIM_OFF);
+lv_bar_set_start_value(ui_progress, 0, LV_ANIM_OFF);
+lv_obj_set_width( ui_progress, 160);
+lv_obj_set_height( ui_progress, 8);
+lv_obj_set_x( ui_progress, 0 );
+lv_obj_set_y( ui_progress, 3 );
+lv_obj_set_align( ui_progress, LV_ALIGN_CENTER );
+
 }
 
 void ui_loading_screen_destroy(void)
@@ -45,5 +56,6 @@ void ui_loading_screen_destroy(void)
 ui_loading= NULL;
 ui_connect= NULL;
 ui_ipaddr= NULL;
+ui_progress= NULL;
 
 }

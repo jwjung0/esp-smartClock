@@ -16,6 +16,7 @@ extern void ui_loading_screen_destroy(void);
 extern lv_obj_t *ui_loading;
 extern lv_obj_t *ui_connect;
 extern lv_obj_t *ui_ipaddr;
+extern lv_obj_t *ui_progress;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus
