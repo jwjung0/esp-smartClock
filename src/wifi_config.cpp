@@ -2,6 +2,8 @@
 
 #if defined(FIRMWARE_MODE_APP)
 
+#include "market_fetch.h"
+
 #include <DNSServer.h>
 #include <ESPmDNS.h>
 #include <Preferences.h>
@@ -203,7 +205,7 @@ static void handleRoot() {
   const String clockHtml = colorToHtml(clockColor);
 
   String html;
-  html.reserve(7000);
+  html.reserve(11000);
   html += F("<!DOCTYPE html><html><head><meta charset=utf-8>"
             "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
             "<title>SmartClock WiFi</title><style>"
@@ -230,6 +232,20 @@ static void handleRoot() {
             ".color-hex{font-family:ui-monospace,monospace;color:#aaa;font-size:.9rem}"
             ".preview{display:inline-block;min-width:4.5rem;padding:.2rem .5rem;"
             "border-radius:.3rem;background:#000;font-weight:600}"
+            ".chk{display:flex;align-items:center;gap:.6rem;margin:.45rem 0;"
+            "font-size:.95rem}"
+            ".chk input{width:auto;margin:0}"
+            ".mkt-add{display:grid;grid-template-columns:1fr 1fr auto;gap:.4rem;"
+            "align-items:end;margin-top:.5rem}"
+            ".mkt-add label{margin:0}"
+            ".mkt-add button{margin:0;width:auto;padding:.55rem .75rem}"
+            ".mkt-list{list-style:none;padding:0;margin:.6rem 0 0}"
+            ".mkt-list li{display:flex;align-items:center;justify-content:space-between;"
+            "gap:.5rem;padding:.45rem 0;border-top:1px solid #2a2a2a;font-size:.9rem}"
+            ".mkt-list button{width:auto;margin:0;padding:.35rem .55rem;font-size:.8rem;"
+            "background:#333;color:#eee}"
+            ".hint{font-size:.8rem;color:#888;margin:.35rem 0 0;line-height:1.35}"
+            "button.secondary{background:#333;color:#eee;margin-top:.5rem}"
             ".sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:20;"
             "opacity:0;pointer-events:none;transition:opacity .2s}"
             ".sheet-bg.open{opacity:1;pointer-events:auto}"
@@ -316,6 +332,30 @@ static void handleRoot() {
   html += F("</span></div>"
             "</div></section>");
 
+  String marketJson;
+  if (!marketConfigGetJson(marketJson))
+    marketJson = F("{\"d\":{\"KS\":1,\"KQ\":1,\"Nasdaq\":1,\"USD\":1},\"c\":[]}");
+
+  html += F("<section class=box>"
+            "<h1>Market</h1>"
+            "<div class=chk><label><input type=checkbox id=mkt_KS> KS (KOSPI)</label></div>"
+            "<div class=chk><label><input type=checkbox id=mkt_KQ> KQ (KOSDAQ)</label></div>"
+            "<div class=chk><label><input type=checkbox id=mkt_Nasdaq> Nasdaq</label></div>"
+            "<div class=chk><label><input type=checkbox id=mkt_USD> USD (USD/KRW)</label></div>"
+            "<p class=hint>Custom: English name on the ticker + Naver code "
+            "(e.g. Samsung / 005930). Max 4 custom, 8 quotes total.</p>"
+            "<div class=mkt-add>"
+            "<div><label for=mkt_name>Name</label>"
+            "<input id=mkt_name maxlength=15 placeholder=\"Samsung\"></div>"
+            "<div><label for=mkt_code>Code</label>"
+            "<input id=mkt_code maxlength=15 placeholder=\"005930\"></div>"
+            "<button type=button id=mkt_add>Add</button>"
+            "</div>"
+            "<ul class=mkt-list id=mkt_list></ul>"
+            "<button type=button id=mkt_save>Save market</button>"
+            "<p class=msg id=mkt_msg style=\"display:none\"></p>"
+            "</section>");
+
   // Same basis as PlatformIO: sketch size vs running app partition (huge_app 3MB).
   const uint32_t flashUsed = ESP.getSketchSize();
   const esp_partition_t *appPart = esp_ota_get_running_partition();
@@ -340,17 +380,24 @@ static void handleRoot() {
             "</div>");
 
   html += F("<script>"
-            "fetch('/scan').then(r=>r.json()).then(list=>{"
-            "const s=document.getElementById('ssid');"
-            "s.innerHTML='';"
-            "if(!list.length){s.innerHTML='<option value=\"\">(none found)</option>';return;}"
+            "function fillScan(list){"
+            "const s=document.getElementById('ssid');s.innerHTML='';"
+            "if(!list||!list.length){s.innerHTML='<option value=\"\">(scanning…)</option>';return false;}"
             "list.forEach(n=>{"
             "const o=document.createElement('option');"
             "o.value=n.ssid;"
             "o.textContent=n.ssid+' ('+n.rssi+' dBm'+(n.open?', open':'')+')';"
-            "s.appendChild(o);});"
-            "}).catch(()=>{document.getElementById('ssid').innerHTML="
-            "'<option value=\"\">Scan failed</option>';});"
+            "s.appendChild(o);});return true;}"
+            "function loadScan(left){"
+            "fetch('/scan').then(r=>r.json()).then(list=>{"
+            "if(fillScan(list)||left<=0){"
+            "if(!list||!list.length)document.getElementById('ssid').innerHTML="
+            "'<option value=\"\">(none found)</option>';"
+            "return;}"
+            "setTimeout(()=>loadScan(left-1),400);})"
+            ".catch(()=>{document.getElementById('ssid').innerHTML="
+            "'<option value=\"\">Scan failed</option>';});}"
+            "loadScan(25);"
             "document.querySelector('form[action=\"/connect\"]').addEventListener('submit',e=>{"
             "const m=document.getElementById('manual').value.trim();"
             "if(m){document.getElementById('ssid').value=m;}"
@@ -414,13 +461,50 @@ static void handleRoot() {
             "()=>openSheet('clock_color','HH / MM color'));"
             "bg.addEventListener('click',closeSheet);"
             "syncColorUI('date_color');syncColorUI('clock_color');"
+            "const MKT=");
+  html += marketJson;
+  html += F(";"
+            "function mktRender(){"
+            "['KS','KQ','Nasdaq','USD'].forEach(k=>{"
+            "const el=document.getElementById('mkt_'+k);"
+            "if(el)el.checked=!!(MKT.d&&Number(MKT.d[k]));});"
+            "const ul=document.getElementById('mkt_list');ul.innerHTML='';"
+            "(MKT.c||[]).forEach((row,i)=>{"
+            "const li=document.createElement('li');"
+            "li.innerHTML='<span>'+row.t+' <span class=color-hex>('+row.c+')</span></span>';"
+            "const b=document.createElement('button');b.type='button';b.textContent='Remove';"
+            "b.addEventListener('click',()=>{MKT.c.splice(i,1);mktRender();});"
+            "li.appendChild(b);ul.appendChild(li);});}"
+            "function mktMsg(t,ok){"
+            "const m=document.getElementById('mkt_msg');"
+            "m.style.display='block';m.style.color=ok?'#7d7':'#effa5c';m.textContent=t;}"
+            "document.getElementById('mkt_add').addEventListener('click',()=>{"
+            "const t=document.getElementById('mkt_name').value.trim();"
+            "const c=document.getElementById('mkt_code').value.trim();"
+            "if(!t||!c){mktMsg('Name and code required',false);return;}"
+            "if(!MKT.c)MKT.c=[];"
+            "if(MKT.c.length>=4){mktMsg('Max 4 custom tickers',false);return;}"
+            "if(MKT.c.some(x=>x.t.toLowerCase()===t.toLowerCase()||x.c.toLowerCase()===c.toLowerCase())){"
+            "mktMsg('Duplicate name or code',false);return;}"
+            "MKT.c.push({t:t,c:c});"
+            "document.getElementById('mkt_name').value='';"
+            "document.getElementById('mkt_code').value='';"
+            "mktRender();mktMsg('Added — tap Save market',true);});"
+            "document.getElementById('mkt_save').addEventListener('click',()=>{"
+            "MKT.d={KS:0,KQ:0,Nasdaq:0,USD:0};"
+            "['KS','KQ','Nasdaq','USD'].forEach(k=>{"
+            "MKT.d[k]=document.getElementById('mkt_'+k).checked?1:0;});"
+            "fetch('/market',{method:'POST',headers:{'Content-Type':'application/json'},"
+            "body:JSON.stringify(MKT)}).then(r=>r.json()).then(j=>{"
+            "if(j&&j.ok){mktMsg('Saved',true);}else{mktMsg((j&&j.err)||'Save failed',false);}"
+            "}).catch(()=>mktMsg('Save failed',false));});"
+            "mktRender();"
             "</script></body></html>");
 
   server.send(200, "text/html", html);
 }
 
 static void handleScan() {
-  // Blocking scan; yield briefly before to keep LVGL happier if called rarely.
   yield();
   const int n = WiFi.scanNetworks(/*async=*/false, /*hidden=*/true);
   String json = "[";
@@ -495,6 +579,30 @@ static void handleColors() {
   }
 }
 
+static void handleMarketGet() {
+  String json;
+  if (!marketConfigGetJson(json))
+    json = F("{\"d\":{\"KS\":1,\"KQ\":1,\"Nasdaq\":1,\"USD\":1},\"c\":[]}");
+  server.send(200, "application/json", json);
+}
+
+static void handleMarketPost() {
+  String body = server.arg("plain");
+  if (!body.length())
+    body = server.arg("body");
+  String err;
+  if (!marketConfigApplyJson(body.c_str(), &err)) {
+    String resp = "{\"ok\":false,\"err\":\"";
+    resp += htmlEscape(err.length() ? err : String("invalid"));
+    resp += "\"}";
+    server.send(400, "application/json", resp);
+    return;
+  }
+  // NVS only here — HTTPS runs on a background task (see marketFetch).
+  marketFetchRequestRefresh();
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
 static void handleCaptive() {
   server.sendHeader("Location", String("http://") + kApIp.toString() + "/",
                     true);
@@ -506,6 +614,8 @@ static void setupHttpRoutes() {
   server.on("/scan", HTTP_GET, handleScan);
   server.on("/connect", HTTP_POST, handleConnect);
   server.on("/colors", HTTP_POST, handleColors);
+  server.on("/market", HTTP_GET, handleMarketGet);
+  server.on("/market", HTTP_POST, handleMarketPost);
   // Captive portal probes
   server.on("/generate_204", HTTP_GET, handleCaptive);
   server.on("/hotspot-detect.html", HTTP_GET, handleCaptive);

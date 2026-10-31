@@ -30,17 +30,16 @@ extern "C" {
 #include "screens/ui_home.h"
 
 ///////////////////// VARIABLES ////////////////////
-extern lv_anim_t * spin_Animation( lv_obj_t *TargetObject, int delay);
 
 // EVENTS
 extern lv_obj_t *ui____initial_actions0;
 
 // IMAGES AND IMAGE SETS
-LV_IMG_DECLARE( ui_img_537441319);   // assets/icon-calendar.png
+LV_IMG_DECLARE( ui_img_539372687);   // assets/icons-wifi.png
 LV_IMG_DECLARE( ui_img_weather_clear_png);   // assets/weather_clear.png
 LV_IMG_DECLARE( ui_img_1433770785);   // assets/icons-humid.png
 LV_IMG_DECLARE( ui_img_icon_temp_png);   // assets/icon_temp.png
-LV_IMG_DECLARE( ui_img_539372687);   // assets/icons-wifi.png
+LV_IMG_DECLARE( ui_img_537441319);   // assets/icon-calendar.png
 LV_IMG_DECLARE( ui_img_959432778);   // assets/weather-atmosphere.png
 LV_IMG_DECLARE( ui_img_1018541966);   // assets/weather-clear-night.png
 LV_IMG_DECLARE( ui_img_575321948);   // assets/weather-clouds.png

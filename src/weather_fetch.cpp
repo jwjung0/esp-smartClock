@@ -64,7 +64,8 @@ bool weatherFetchOnce(void) {
   if (!OPENWEATHER_API_KEY || !OPENWEATHER_API_KEY[0] ||
       strcmp(OPENWEATHER_API_KEY, "YOUR_OPENWEATHER_API_KEY") == 0 ||
       strcmp(OPENWEATHER_API_KEY, "tbd") == 0) {
-    Serial.println("weather fetch: set OPENWEATHER_API_KEY in weather_config.h");
+    Serial.println(
+        "weather fetch: set OPENWEATHER_API_KEY in weather_config.h");
     return false;
   }
 

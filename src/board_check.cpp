@@ -22,10 +22,10 @@ static const uint32_t kSpiHz = 8000000;
 static Adafruit_ST7789 tft =
     Adafruit_ST7789(&SPI, PIN_TFT_CS, PIN_TFT_DC, PIN_TFT_RST);
 
-static const uint16_t kColors[] = {
-    ST77XX_RED,    ST77XX_GREEN, ST77XX_BLUE, ST77XX_WHITE,
-    ST77XX_YELLOW, ST77XX_CYAN,  ST77XX_BLACK};
-static const char *kColorNames[] = {"RED",  "GREEN", "BLUE", "WHITE",
+static const uint16_t kColors[] = {ST77XX_RED,   ST77XX_GREEN,  ST77XX_BLUE,
+                                   ST77XX_WHITE, ST77XX_YELLOW, ST77XX_CYAN,
+                                   ST77XX_BLACK};
+static const char *kColorNames[] = {"RED",    "GREEN", "BLUE", "WHITE",
                                     "YELLOW", "CYAN",  "BLACK"};
 static const size_t kColorCount = sizeof(kColors) / sizeof(kColors[0]);
 static size_t colorIndex = 0;
@@ -58,7 +58,8 @@ static void bmeCheckOnce() {
 static bool wifiConnectFromNvs(uint32_t timeoutMs) {
   Preferences prefs;
   if (!prefs.begin("wifi", true)) {
-    Serial.println("OpenWeather: NVS wifi ns missing — flash app + provision first");
+    Serial.println(
+        "OpenWeather: NVS wifi ns missing — flash app + provision first");
     return false;
   }
   const String ssid = prefs.getString("ssid", "");
@@ -151,7 +152,8 @@ static void blinkBacklight() {
     delay(350);
   }
   digitalWrite(PIN_TFT_BL, HIGH);
-  Serial.println("If BL did not blink, move LCD BL wire to GPIO22 (D22), not 3V3");
+  Serial.println(
+      "If BL did not blink, move LCD BL wire to GPIO22 (D22), not 3V3");
 }
 
 static void lcdShowColor(size_t idx) {
@@ -159,9 +161,9 @@ static void lcdShowColor(size_t idx) {
     return;
   const uint16_t color = kColors[idx];
   const char *name = kColorNames[idx];
-  const uint16_t text =
-      (color == ST77XX_BLACK || color == ST77XX_BLUE) ? ST77XX_WHITE
-                                                      : ST77XX_BLACK;
+  const uint16_t text = (color == ST77XX_BLACK || color == ST77XX_BLUE)
+                            ? ST77XX_WHITE
+                            : ST77XX_BLACK;
 
   tft.fillScreen(color);
   tft.setTextColor(text);

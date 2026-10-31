@@ -3,6 +3,7 @@
 #if defined(FIRMWARE_MODE_APP)
 
 #include "bme_sensor.h"
+#include "market_fetch.h"
 #include "weather_fetch.h"
 #include "wifi_config.h"
 
@@ -18,8 +19,8 @@
 #error "Build app with INGEST_ENV_LOCAL or INGEST_ENV_PROD"
 #endif
 
-static const uint32_t INTERVAL_MS = 10UL * 60UL * 1000UL;  // 10min
-static const uint32_t RETRY_MS = 60UL * 1000UL; // 60s
+static const uint32_t INTERVAL_MS = 10UL * 60UL * 1000UL; // 10min
+static const uint32_t RETRY_MS = 60UL * 1000UL;           // 60s
 
 static uint32_t nextPostMs = 0;
 // After a failed read/post, one 30s retry then back to 10 min.
@@ -114,8 +115,9 @@ void dataIngestLoop(bool allowRadioOff) {
   float t = 0, h = 0, p = 0;
   const bool sensorOk = bmeSensorRead(&t, &h, &p);
   const bool postOk = postReading(sensorOk, t, h);
-  // Same Wi‑Fi session: outdoor OpenWeather after indoor ingest POST.
+  // Same Wi‑Fi session: outdoor OpenWeather + market ticker after ingest POST.
   const bool weatherOk = weatherFetchOnce();
+  const bool marketOk = marketFetchOnce();
 
   if (postOk && sensorOk) {
     scheduleNext(false);
@@ -124,7 +126,6 @@ void dataIngestLoop(bool allowRadioOff) {
     else
       Serial.printf("data ingest ok  T=%.2f RH=%.1f\n", t, h);
   } else if (postOk && !sensorOk) {
-    // Server sees null T/RH → sensor failed/missing.
     scheduleNext(true);
     Serial.println("data ingest ok (sensor null); one 30s retry then 10 min");
   } else {
@@ -136,8 +137,10 @@ void dataIngestLoop(bool allowRadioOff) {
   }
 
   if (!weatherOk && postOk && sensorOk) {
-    // Keep 10 min cadence for ingest success; weather retries next wake.
     Serial.println("weather fetch failed; will retry on next ingest wake");
+  }
+  if (!marketOk && postOk && sensorOk) {
+    Serial.println("market fetch failed; will retry on next ingest wake");
   }
 
   if (allowRadioOff) {

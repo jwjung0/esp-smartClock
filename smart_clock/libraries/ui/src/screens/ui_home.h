@@ -38,6 +38,7 @@ extern lv_obj_t *ui_temp_norm;
 extern lv_obj_t *ui_temp_high;
 extern lv_obj_t *ui_humid_norm;
 extern lv_obj_t *ui_humid_low;
+extern lv_obj_t *ui_market;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus

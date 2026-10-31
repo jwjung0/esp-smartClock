@@ -53,16 +53,24 @@ Six-pin modules also have **CSB** / **SDO** (sometimes silk **CSR** / **SDK**). 
 - Clock UI on the 1.54" LCD (SquareLine / LVGL)
 - Wi‑Fi provisioning via local HTTP portal (SoftAP + STA)
 - NTP time sync in **KST (UTC+9)** → live `ui_time` / `ui_date`
-- Power policy: **10 min** config window after boot, then Wi‑Fi off; **daily** NTP resync; **every 10 min** climate data ingest (brief Wi‑Fi wake → POST → OpenWeather GET → off)
+- Power policy: **10 min** config window after boot, then Wi‑Fi off; **daily** NTP resync; **every 10 min** climate data ingest (brief Wi‑Fi wake → POST → OpenWeather GET → Naver market GET → off)
 - Climate ingest deploy targets: **local** (this Mac) vs **prod** (Ubuntu) via gitignored `include/ingest_config_*.h`
 - Live indoor T/RH from BME280 on `ui_temp*` / `ui_humid`
 - Outdoor weather via **OpenWeather Current Weather API 2.5** → `ui_current_temp`, `ui_current_humid`, image `ui_weather` (free-tier key; One Call 3.0/4.0 need a paid plan)
+- Market ticker via **Naver Finance** (unofficial JSON) → scrolling Label `ui_market`: defaults **KS** / **KQ** / **Nasdaq** / **USD**, plus optional custom tickers from the config portal. Up = red, down = blue, flat = white
 
 **SquareLine outdoor weather**
 
 - Widgets: Image `ui_weather`, Labels `ui_current_temp` / `ui_current_humid` (+ `ui_current_celcus` / `ui_current_pct`)
 - Assets: `weather_clear`, `weather-clouds`, `weather-rain`, `weather-thunder`, `weather-snow`, `weather-atmosphere`. Firmware maps `weather[0].main` (`Rain`/`Drizzle` → rain, mist/fog/… → atmosphere, `Tornado` → thunder)
 - Create gitignored `include/weather_config.h` with `OPENWEATHER_API_KEY` and lat/lon (default Seoul-ish `37.49056` / `127.02`)
+
+**SquareLine market ticker**
+
+- Widget: Label `ui_market` (fixed width ~220–240 px, long mode **Scroll circular**, recolor on)
+- Firmware overwrites text with colored segments, e.g. `KS 5730.74 -3.48%  KQ 724.38 -3.83%  Nasdaq 25437.00 -2.86%  USD 1335.80 -0.35%`
+- Refreshes on boot (if STA up) and on the same ~10 min climate wake as weather
+- **Config portal → Market**: toggle default KS/KQ/Nasdaq/USD; add custom rows with English **Name** + Naver **Code** (e.g. `Samsung` / `005930`). Max 4 custom, 8 quotes total. Stored in NVS namespace `market`. Custom marquee uses the Name you enter (`Samsung 220,500 -5.17%`). Code kinds: 6-digit stock, `KOSPI`/`KOSDAQ`/`KPI200`, world index (`.IXIC`), FX (`FX_USDKRW`)
 
 **Checkup**
 
@@ -80,10 +88,10 @@ Six-pin modules also have **CSB** / **SDO** (sometimes silk **CSR** / **SDK**). 
 6. SoftAP setup stays **http://192.168.4.1/**.
 7. Portal stays up for **10 minutes after boot**, then Wi‑Fi turns off. Power-cycle for another config window.
 8. NTP resyncs about **once per day** (brief Wi‑Fi wake, then off again). Time zone: **KST**.
-9. After the config window, climate readings POST about **every 10 minutes** (Wi‑Fi on → POST → OpenWeather GET → off). Set URL/token in gitignored `include/ingest_config_local.h` / `include/ingest_config_prod.h`.
-10. Same wake fetches outdoor weather (HTTPS, `units=metric`). Set the API key in gitignored `include/weather_config.h`.
+9. After the config window, climate readings POST about **every 10 minutes** (Wi‑Fi on → POST → OpenWeather GET → Naver market GET → off). Set URL/token in gitignored `include/ingest_config_local.h` / `include/ingest_config_prod.h`.
+10. Same wake fetches outdoor weather (HTTPS, `units=metric`) and market quotes (Naver). Set the OpenWeather API key in gitignored `include/weather_config.h`.
 
-Credentials are stored in NVS (`Preferences` namespace `wifi`).
+Credentials are stored in NVS (`Preferences` namespace `wifi`). UI colors use `clockui`; market defaults/customs use `market`.
 
 ## Firmware envs
 
@@ -141,7 +149,8 @@ src/main.cpp                # setup/loop — switches on FIRMWARE_MODE_*
 src/board_check.h/.cpp      # LED + serial smoke test
 src/clock_app.h/.cpp        # LVGL clock app
 src/data_ingest.h/.cpp      # BME280 → HTTP climate ingest (10 min wake)
-src/weather_fetch.h/.cpp    # OpenWeather One Call 4.0 current (HTTPS)
+src/weather_fetch.h/.cpp    # OpenWeather 2.5 /weather (HTTPS)
+src/market_fetch.h/.cpp     # Naver Finance KS/KQ/Nasdaq/USD ticker (HTTPS)
 src/wifi_config.h/.cpp      # SoftAP/STA portal, NVS credentials
 src/time_sync.h/.cpp        # NTP (KST) + UI time/date formatters
 src/bme_sensor.h/.cpp       # BME280 I2C read

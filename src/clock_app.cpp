@@ -6,6 +6,7 @@
 
 #include "bme_sensor.h"
 #include "data_ingest.h"
+#include "market_fetch.h"
 #include "time_sync.h"
 #include "weather_fetch.h"
 #include "wifi_config.h"
@@ -17,9 +18,10 @@
 static const uint16_t kScreenW = 240;
 static const uint16_t kScreenH = 240;
 static const uint32_t kNtpWaitMs = 15000;
-static const uint32_t kBootConfigMs = 10UL * 60UL * 1000UL;   // portal window
+static const uint32_t kBootConfigMs = 10UL * 60UL * 1000UL; // portal window
 static const uint32_t kDailySyncMs = 24UL * 60UL * 60UL * 1000UL;
-static const uint32_t kClimateUiMs = 5000; // refresh ui_temp / ui_humid from BMx280
+static const uint32_t kClimateUiMs =
+    5000; // refresh ui_temp / ui_humid from BMx280
 static const uint32_t kProgressAnimMs = 500;
 static const uint32_t kCreepIntervalMs = 60;
 
@@ -98,8 +100,7 @@ static void applyClockColors() {
 static void styleSolidBlack(lv_obj_t *obj) {
   if (!obj)
     return;
-  lv_obj_set_style_bg_color(obj, lv_color_hex(0x000000),
-                            kMain);
+  lv_obj_set_style_bg_color(obj, lv_color_hex(0x000000), kMain);
   lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, kMain);
 }
 
@@ -116,7 +117,8 @@ static lv_coord_t maxDigitGlyphWidth(const lv_font_t *font,
   return maxW;
 }
 
-// Replace a 2-digit SquareLine label with two fixed digit slots (no proportional shift).
+// Replace a 2-digit SquareLine label with two fixed digit slots (no
+// proportional shift).
 static void setupDigitPair(DigitPair *pair, lv_obj_t *host) {
   if (!pair || !host || !ui_home)
     return;
@@ -133,7 +135,8 @@ static void setupDigitPair(DigitPair *pair, lv_obj_t *host) {
   const lv_coord_t digitW = maxDigitGlyphWidth(font, letterSpace) + 2;
   const lv_coord_t pairW = digitW * 2;
   const lv_coord_t lineH = lv_font_get_line_height(font) + 2;
-  // Use style offsets (SquareLine ALIGN_CENTER), NOT lv_obj_get_x/y (absolute after layout).
+  // Use style offsets (SquareLine ALIGN_CENTER), NOT lv_obj_get_x/y (absolute
+  // after layout).
   const lv_coord_t x = lv_obj_get_style_x(host, LV_PART_MAIN);
   const lv_coord_t y = lv_obj_get_style_y(host, LV_PART_MAIN);
 
@@ -294,43 +297,34 @@ static void applyDarkTheme() {
   }
 
   if (ui_connect)
-    lv_obj_set_style_text_color(ui_connect, white,
-                                kMain);
+    lv_obj_set_style_text_color(ui_connect, white, kMain);
   if (ui_progress) {
     lv_obj_set_style_bg_color(ui_progress, lv_color_hex(0x333333), kMain);
     lv_obj_set_style_bg_opa(ui_progress, LV_OPA_COVER, kMain);
     lv_obj_set_style_radius(ui_progress, 4, kMain);
     lv_obj_set_style_anim_time(ui_progress, kProgressAnimMs, kMain);
-    lv_obj_set_style_bg_color(ui_progress, lv_color_hex(0xFDDF03),
-                              kIndicator);
+    lv_obj_set_style_bg_color(ui_progress, lv_color_hex(0xFDDF03), kIndicator);
     lv_obj_set_style_bg_opa(ui_progress, LV_OPA_COVER, kIndicator);
     lv_obj_set_style_radius(ui_progress, 4, kIndicator);
     lv_bar_set_range(ui_progress, 0, 100);
     lv_bar_set_value(ui_progress, 0, LV_ANIM_OFF);
   }
   if (ui_temp)
-    lv_obj_set_style_text_color(ui_temp, white,
-                                kMain);
+    lv_obj_set_style_text_color(ui_temp, white, kMain);
   if (ui_humid)
-    lv_obj_set_style_text_color(ui_humid, white,
-                                kMain);
+    lv_obj_set_style_text_color(ui_humid, white, kMain);
   if (ui_celsus)
-    lv_obj_set_style_text_color(ui_celsus, white,
-                                kMain);
+    lv_obj_set_style_text_color(ui_celsus, white, kMain);
   if (ui_pct)
     lv_obj_set_style_text_color(ui_pct, white, kMain);
   if (ui_current_temp)
-    lv_obj_set_style_text_color(ui_current_temp, white,
-                                kMain);
+    lv_obj_set_style_text_color(ui_current_temp, white, kMain);
   if (ui_current_humid)
-    lv_obj_set_style_text_color(ui_current_humid, white,
-                                kMain);
+    lv_obj_set_style_text_color(ui_current_humid, white, kMain);
   if (ui_current_celcus)
-    lv_obj_set_style_text_color(ui_current_celcus, white,
-                                kMain);
+    lv_obj_set_style_text_color(ui_current_celcus, white, kMain);
   if (ui_current_pct)
-    lv_obj_set_style_text_color(ui_current_pct, white,
-                                kMain);
+    lv_obj_set_style_text_color(ui_current_pct, white, kMain);
 
   fixNumericLabelWidths();
 }
@@ -453,9 +447,9 @@ static void updateWifiIcon() {
   if (!ui_wifi)
     return;
   // Always visible: wifi asset while radio is on, calendar while radio sleeps.
-  const lv_img_dsc_t *src =
-      wifiConfigIsRadioOn() ? &ui_img_539372687  // icons-wifi
-                            : &ui_img_537441319; // icon-calendar
+  const lv_img_dsc_t *src = wifiConfigIsRadioOn()
+                                ? &ui_img_539372687  // icons-wifi
+                                : &ui_img_537441319; // icon-calendar
   if (lv_img_get_src(ui_wifi) != src)
     lv_img_set_src(ui_wifi, src);
   lv_obj_clear_flag(ui_wifi, LV_OBJ_FLAG_HIDDEN);
@@ -488,6 +482,108 @@ static void updateOutdoorWeatherUi() {
     }
   }
   setWeatherIcon(mainBuf);
+}
+
+// Korean market colors: up=red, down=blue, flat=white (LVGL #RRGGBB recolor).
+static uint32_t marketColorForPct(float pct) {
+  if (pct > 0.0f)
+    return 0xFF3333;
+  if (pct < 0.0f)
+    return 0x3399FF;
+  return 0xFFFFFF;
+}
+
+// Format with thousands separators, e.g. 25437.00 → "25,437.00"
+static void formatPriceWithCommas(float price, char *out, size_t outLen) {
+  if (!out || outLen < 8) {
+    if (out && outLen)
+      out[0] = '\0';
+    return;
+  }
+
+  const bool neg = price < 0.0f;
+  if (neg)
+    price = -price;
+
+  const long whole = (long)price;
+  int cents = (int)lroundf((price - (float)whole) * 100.0f);
+  long adjWhole = whole;
+  if (cents >= 100) {
+    cents -= 100;
+    adjWhole += 1;
+  } else if (cents < 0) {
+    cents += 100;
+    adjWhole -= 1;
+  }
+
+  char digits[16];
+  snprintf(digits, sizeof(digits), "%ld", adjWhole < 0 ? -adjWhole : adjWhole);
+
+  size_t used = 0;
+  if (neg && used + 1 < outLen)
+    out[used++] = '-';
+
+  const size_t len = strlen(digits);
+  for (size_t i = 0; i < len; ++i) {
+    if (i > 0 && (len - i) % 3 == 0) {
+      if (used + 1 >= outLen)
+        break;
+      out[used++] = ',';
+    }
+    if (used + 1 >= outLen)
+      break;
+    out[used++] = digits[i];
+  }
+
+  if (used + 4 < outLen)
+    snprintf(out + used, outLen - used, ".%02d", cents);
+  else
+    out[used < outLen ? used : outLen - 1] = '\0';
+}
+
+static void updateMarketUi() {
+  if (!ui_market)
+    return;
+
+  lv_label_set_recolor(ui_market, true);
+  lv_label_set_long_mode(ui_market, LV_LABEL_LONG_SCROLL_CIRCULAR);
+
+  if (!marketFetchHasData() || marketFetchCount() == 0) {
+    lv_label_set_text(ui_market, "KS --.-- --.--%  KQ --.-- --.--%");
+    return;
+  }
+
+  char line[288];
+  size_t used = 0;
+  line[0] = '\0';
+
+  for (size_t i = 0; i < marketFetchCount(); ++i) {
+    MarketQuote q;
+    if (!marketFetchGetAt(i, &q) || !q.valid)
+      continue;
+
+    const uint32_t color = marketColorForPct(q.pct);
+    char priceBuf[24];
+    formatPriceWithCommas(q.price, priceBuf, sizeof(priceBuf));
+
+    char seg[80];
+    const int n =
+        snprintf(seg, sizeof(seg), "%s#%06X %s %s %+0.2f%%#",
+                 used > 0 ? "  " : "", (unsigned)color, q.tag, priceBuf,
+                 (double)q.pct);
+    if (n <= 0 || (size_t)n >= sizeof(seg))
+      continue;
+    if (used + (size_t)n + 1 > sizeof(line))
+      break;
+    memcpy(line + used, seg, (size_t)n);
+    used += (size_t)n;
+    line[used] = '\0';
+  }
+
+  if (used == 0)
+    lv_label_set_text(ui_market, "KS --.-- --.--%  KQ --.-- --.--%");
+  else
+    lv_label_set_text(ui_market, line);
 }
 
 enum class ClimateLevel { Low, Norm, High };
@@ -527,10 +623,8 @@ static void paintLevelBars(lv_obj_t *low, lv_obj_t *norm, lv_obj_t *high,
   for (int i = 0; i < 3; ++i) {
     if (!bars[i])
       continue;
-    lv_obj_set_style_bg_color(bars[i], lv_color_hex(colors[i]),
-                              kMain);
-    lv_obj_set_style_bg_opa(bars[i], LV_OPA_COVER,
-                            kMain);
+    lv_obj_set_style_bg_color(bars[i], lv_color_hex(colors[i]), kMain);
+    lv_obj_set_style_bg_opa(bars[i], LV_OPA_COVER, kMain);
   }
 }
 
@@ -607,10 +701,22 @@ static void paintTime(const struct tm &localTm) {
   }
   if (localTm.tm_hour != lastHour) {
     lastHour = localTm.tm_hour;
-    // Swap Clear day/night icon at 06:00 / 18:00 without waiting for weather fetch.
+    // Swap Clear day/night icon at 06:00 / 18:00 without waiting for weather
+    // fetch.
     refreshWeatherIconFromCache();
   }
   blinkColon(localTm);
+}
+
+static void homeUiPump() {
+  if (onHomeScreen) {
+    struct tm localTm;
+    if (timeSyncTick(&localTm)) {
+      paintTime(localTm);
+      lv_refr_now(NULL);
+    }
+  }
+  lvglPump();
 }
 
 static void showHome() {
@@ -624,6 +730,11 @@ static void showHome() {
   nextClimateUiMs = millis() + kClimateUiMs;
   lv_disp_load_scr(ui_home);
   onHomeScreen = true;
+  // During portal Connect / scan waits, wifiIdle() keeps the clock moving.
+  wifiConfigSetIdleCallback(homeUiPump);
+  // Apply ticker after home is the active screen so circular scroll starts.
+  updateMarketUi();
+  (void)marketFetchTakeUpdated();
   lvglPump();
 }
 
@@ -667,7 +778,7 @@ static void runDailyNtpSync() {
   const time_t t0 = hadTime ? mktime(&before) : 0;
 
   while ((millis() - start) < kNtpWaitMs) {
-    lvglPump();
+    homeUiPump();
     struct tm nowTm;
     if (getLocalTime(&nowTm, 0)) {
       const time_t t1 = mktime(&nowTm);
@@ -758,15 +869,26 @@ void clockAppSetup() {
 
   bmeSensorBegin();
   weatherFetchBegin();
-  // Fetch outdoor weather now while STA is still up (do not wait for 15s ingest).
+  marketFetchBegin();
+  // Startup fetch while STA is up (do not wait for the 15s ingest wake).
   if (wifiConfigIsConnected()) {
     showLoading("Fetching weather...");
     setLoadingProgress(75, true);
-    setLoadingCreepCeiling(95);
+    setLoadingCreepCeiling(90);
     const uint32_t weatherUiStart = millis();
     while (millis() - weatherUiStart < 400)
       loadingPump();
     weatherFetchOnce();
+
+    showLoading("Fetching market...");
+    setLoadingProgress(88, true);
+    setLoadingCreepCeiling(95);
+    loadingPump();
+    if (!marketFetchOnce()) {
+      Serial.println("market fetch: boot retry");
+      loadingPump();
+      marketFetchOnce();
+    }
   }
   dataIngestBegin();
 
@@ -809,9 +931,13 @@ void clockAppLoop() {
     runDailyNtpSync();
   }
 
+  marketFetchService();
+
   dataIngestLoop(!bootConfigOpen);
   if (onHomeScreen && weatherFetchTakeUpdated())
     updateOutdoorWeatherUi();
+  if (onHomeScreen && marketFetchTakeUpdated())
+    updateMarketUi();
   if (onHomeScreen)
     updateWifiIcon();
 

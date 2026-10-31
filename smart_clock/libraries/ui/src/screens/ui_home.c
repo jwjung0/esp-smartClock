@@ -5,7 +5,7 @@
 
 #include "../ui.h"
 
-lv_obj_t *ui_home = NULL;lv_obj_t *ui_temp = NULL;lv_obj_t *ui_humid = NULL;lv_obj_t *ui_celsus = NULL;lv_obj_t *ui_pct = NULL;lv_obj_t *ui_hh1 = NULL;lv_obj_t *ui_mm1 = NULL;lv_obj_t *ui_ss1 = NULL;lv_obj_t *ui_current_temp = NULL;lv_obj_t *ui_current_humid = NULL;lv_obj_t *ui_wkday = NULL;lv_obj_t *ui_date = NULL;lv_obj_t *ui_wifi = NULL;lv_obj_t *ui_weather = NULL;lv_obj_t *ui_box1 = NULL;lv_obj_t *ui_current_celcus = NULL;lv_obj_t *ui_current_pct = NULL;lv_obj_t *ui_icon_humid = NULL;lv_obj_t *ui_icon_temp = NULL;lv_obj_t *ui_temp_low = NULL;lv_obj_t *ui_humid_high = NULL;lv_obj_t *ui_temp_norm = NULL;lv_obj_t *ui_temp_high = NULL;lv_obj_t *ui_humid_norm = NULL;lv_obj_t *ui_humid_low = NULL;
+lv_obj_t *ui_home = NULL;lv_obj_t *ui_temp = NULL;lv_obj_t *ui_humid = NULL;lv_obj_t *ui_celsus = NULL;lv_obj_t *ui_pct = NULL;lv_obj_t *ui_hh1 = NULL;lv_obj_t *ui_mm1 = NULL;lv_obj_t *ui_ss1 = NULL;lv_obj_t *ui_current_temp = NULL;lv_obj_t *ui_current_humid = NULL;lv_obj_t *ui_wkday = NULL;lv_obj_t *ui_date = NULL;lv_obj_t *ui_wifi = NULL;lv_obj_t *ui_weather = NULL;lv_obj_t *ui_box1 = NULL;lv_obj_t *ui_current_celcus = NULL;lv_obj_t *ui_current_pct = NULL;lv_obj_t *ui_icon_humid = NULL;lv_obj_t *ui_icon_temp = NULL;lv_obj_t *ui_temp_low = NULL;lv_obj_t *ui_humid_high = NULL;lv_obj_t *ui_temp_norm = NULL;lv_obj_t *ui_temp_high = NULL;lv_obj_t *ui_humid_norm = NULL;lv_obj_t *ui_humid_low = NULL;lv_obj_t *ui_market = NULL;
 // event funtions
 
 // build funtions
@@ -60,7 +60,7 @@ ui_hh1 = lv_label_create(ui_home);
 lv_obj_set_width( ui_hh1, LV_SIZE_CONTENT);  /// 1
 lv_obj_set_height( ui_hh1, LV_SIZE_CONTENT);   /// 1
 lv_obj_set_x( ui_hh1, -68 );
-lv_obj_set_y( ui_hh1, 4 );
+lv_obj_set_y( ui_hh1, 25 );
 lv_obj_set_align( ui_hh1, LV_ALIGN_CENTER );
 lv_label_set_text(ui_hh1,"02");
 lv_obj_set_style_text_color(ui_hh1, lv_color_hex(0x00F0FF), LV_PART_MAIN | LV_STATE_DEFAULT );
@@ -71,7 +71,7 @@ ui_mm1 = lv_label_create(ui_home);
 lv_obj_set_width( ui_mm1, LV_SIZE_CONTENT);  /// 1
 lv_obj_set_height( ui_mm1, LV_SIZE_CONTENT);   /// 1
 lv_obj_set_x( ui_mm1, 26 );
-lv_obj_set_y( ui_mm1, 4 );
+lv_obj_set_y( ui_mm1, 25 );
 lv_obj_set_align( ui_mm1, LV_ALIGN_CENTER );
 lv_label_set_text(ui_mm1,"59");
 lv_obj_set_style_text_color(ui_mm1, lv_color_hex(0x00F0FF), LV_PART_MAIN | LV_STATE_DEFAULT );
@@ -82,7 +82,7 @@ ui_ss1 = lv_label_create(ui_home);
 lv_obj_set_width( ui_ss1, LV_SIZE_CONTENT);  /// 1
 lv_obj_set_height( ui_ss1, LV_SIZE_CONTENT);   /// 1
 lv_obj_set_x( ui_ss1, 93 );
-lv_obj_set_y( ui_ss1, 13 );
+lv_obj_set_y( ui_ss1, 34 );
 lv_obj_set_align( ui_ss1, LV_ALIGN_CENTER );
 lv_label_set_text(ui_ss1,"59");
 lv_obj_set_style_text_color(ui_ss1, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT );
@@ -130,7 +130,7 @@ lv_obj_set_style_text_opa(ui_date, 255, LV_PART_MAIN| LV_STATE_DEFAULT);
 lv_obj_set_style_text_font(ui_date, &lv_font_montserrat_24, LV_PART_MAIN| LV_STATE_DEFAULT);
 
 ui_wifi = lv_img_create(ui_home);
-lv_img_set_src(ui_wifi, &ui_img_537441319);
+lv_img_set_src(ui_wifi, &ui_img_539372687);
 lv_obj_set_width( ui_wifi, LV_SIZE_CONTENT);  /// 1
 lv_obj_set_height( ui_wifi, LV_SIZE_CONTENT);   /// 1
 lv_obj_set_x( ui_wifi, -95 );
@@ -271,6 +271,17 @@ lv_obj_set_style_radius(ui_humid_low, 1, LV_PART_MAIN| LV_STATE_DEFAULT);
 lv_obj_set_style_bg_color(ui_humid_low, lv_color_hex(0xFE9F00), LV_PART_MAIN | LV_STATE_DEFAULT );
 lv_obj_set_style_bg_opa(ui_humid_low, 255, LV_PART_MAIN| LV_STATE_DEFAULT);
 
+ui_market = lv_label_create(ui_home);
+lv_obj_set_width( ui_market, 220);
+lv_obj_set_height( ui_market, LV_SIZE_CONTENT);   /// 1
+lv_obj_set_x( ui_market, 0 );
+lv_obj_set_y( ui_market, -28 );
+lv_obj_set_align( ui_market, LV_ALIGN_CENTER );
+lv_label_set_long_mode(ui_market,LV_LABEL_LONG_SCROLL_CIRCULAR);
+lv_label_set_text(ui_market,"KS 5,902.35 +2.3% KQ 788.25 -2.1%");
+lv_obj_set_style_text_align(ui_market, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN| LV_STATE_DEFAULT);
+lv_obj_set_style_text_font(ui_market, &lv_font_montserrat_20, LV_PART_MAIN| LV_STATE_DEFAULT);
+
 }
 
 void ui_home_screen_destroy(void)
@@ -303,5 +314,6 @@ ui_temp_norm= NULL;
 ui_temp_high= NULL;
 ui_humid_norm= NULL;
 ui_humid_low= NULL;
+ui_market= NULL;
 
 }
