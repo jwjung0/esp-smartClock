@@ -2,6 +2,8 @@
 
 #if defined(FIRMWARE_MODE_APP)
 
+#include "weather_fetch.h"
+
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <Preferences.h>
@@ -39,6 +41,8 @@ struct MarketSlot {
 
 static bool hasData = false;
 static bool updatedFlag = false;
+static bool marketVisible = true;
+static bool visibilityChanged = false;
 static MarketQuote quotes[MARKET_MAX_QUOTES];
 static size_t quoteCount = 0;
 
@@ -50,6 +54,8 @@ static MarketQuote pendingQuotes[MARKET_MAX_QUOTES];
 static size_t pendingCount = 0;
 static volatile bool pendingReady = false;
 static volatile bool fetchBusy = false;
+static volatile bool fetchQueued = false;
+static const uint32_t kHttpTimeoutMs = 5000;
 static TaskHandle_t marketTaskHandle = nullptr;
 
 static MarketQuote *storeDst = quotes;
@@ -199,7 +205,7 @@ static bool httpGetJson(const char *url, JsonDocument &doc) {
   client.setInsecure();
 
   HTTPClient http;
-  http.setTimeout(12000);
+  http.setTimeout(kHttpTimeoutMs);
   http.setReuse(false);
   http.setUserAgent(kUserAgent);
   if (!http.begin(client, url)) {
@@ -348,21 +354,112 @@ static size_t fetchDomesticStock(const MarketSlot &slot) {
   return 1;
 }
 
+static bool isNasdaqSlot(const MarketSlot &slot) {
+  return strcmp(slot.tag, "Nasdaq") == 0 || strcmp(slot.code, ".IXIC") == 0;
+}
+
+// Nasdaq only: Yahoo chart meta (~1.3KB). Naver's .IXIC basic JSON is too
+// heavy for ESP32 ArduinoJson; keep other world indexes on Naver polling.
+static size_t fetchNasdaqYahoo(const MarketSlot &slot) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("market fetch: not connected");
+    return 0;
+  }
+
+  const char *url =
+      "https://query1.finance.yahoo.com/v8/finance/chart/%5EIXIC"
+      "?range=1d&interval=1d";
+
+  WiFiClientSecure client;
+  client.setInsecure();
+  HTTPClient http;
+  http.setTimeout(kHttpTimeoutMs);
+  http.setReuse(false);
+  http.setUserAgent(kUserAgent);
+  if (!http.begin(client, url)) {
+    Serial.println("market fetch: Yahoo http.begin failed");
+    return 0;
+  }
+  http.addHeader("Accept", "application/json");
+  http.addHeader("Accept-Encoding", "identity");
+
+  const int code = http.GET();
+  String body = http.getString();
+  http.end();
+  if (code != HTTP_CODE_OK) {
+    Serial.printf("market fetch: Yahoo HTTP %d\n", code);
+    logBodyPrefix(body);
+    return 0;
+  }
+
+  JsonDocument doc;
+  const DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    Serial.printf("market fetch: Yahoo JSON %s\n", err.c_str());
+    logBodyPrefix(body);
+    return 0;
+  }
+
+  JsonObject meta = doc["chart"]["result"][0]["meta"].as<JsonObject>();
+  if (meta.isNull()) {
+    Serial.println("market fetch: Yahoo missing meta");
+    return 0;
+  }
+
+  float price = NAN;
+  float prev = NAN;
+  if (!parseFloatField(meta["regularMarketPrice"], &price)) {
+    Serial.printf("market fetch: %s missing price\n", slot.tag);
+    return 0;
+  }
+  if (!parseFloatField(meta["chartPreviousClose"], &prev) &&
+      !parseFloatField(meta["previousClose"], &prev)) {
+    Serial.printf("market fetch: %s missing previousClose\n", slot.tag);
+    return 0;
+  }
+  const float pct =
+      (prev != 0.0f && !isnan(prev)) ? ((price - prev) / prev) * 100.0f : 0.0f;
+
+  if (!storeQuote(slot.tag, price, pct))
+    return 0;
+  Serial.printf("market fetch ok  %s=%.2f pct=%.2f (Yahoo)\n", slot.tag, price,
+                pct);
+  return 1;
+}
+
 static size_t fetchWorldIndex(const MarketSlot &slot) {
-  char url[160];
-  snprintf(url, sizeof(url), "https://api.stock.naver.com/index/%s/basic",
+  if (isNasdaqSlot(slot))
+    return fetchNasdaqYahoo(slot);
+
+  char url[192];
+  snprintf(url, sizeof(url),
+           "https://polling.finance.naver.com/api/realtime/worldstock/index/%s",
            slot.code);
 
   JsonDocument doc;
   if (!httpGetJson(url, doc))
     return 0;
 
+  JsonArray datas = doc["datas"].as<JsonArray>();
+  if (datas.isNull() || datas.size() == 0) {
+    Serial.printf("market fetch: %s missing datas\n", slot.tag);
+    return 0;
+  }
+
+  JsonObject row = datas[0].as<JsonObject>();
   float price = NAN;
   float pct = NAN;
-  if (!parseCloseAndPct(doc.as<JsonObject>(), &price, &pct)) {
+  if (!parseCloseAndPct(row, &price, &pct)) {
     Serial.printf("market fetch: %s missing price\n", slot.tag);
     return 0;
   }
+
+  const char *dir = row["compareToPreviousPrice"]["name"] | "";
+  if (pct > 0.0f && strcmp(dir, "FALLING") == 0)
+    pct = -pct;
+  else if (pct < 0.0f && strcmp(dir, "RISING") == 0)
+    pct = -pct;
+
   if (!storeQuote(slot.tag, price, pct))
     return 0;
   Serial.printf("market fetch ok  %s=%.2f pct=%.2f\n", slot.tag, price, pct);
@@ -416,6 +513,16 @@ static bool saveConfigToNvs(void) {
   return ok;
 }
 
+static bool jsonFlagOn(JsonVariantConst v, bool defaultOn) {
+  if (v.isNull())
+    return defaultOn;
+  if (v.is<bool>())
+    return v.as<bool>();
+  if (v.is<int>() || v.is<long>())
+    return v.as<int>() != 0;
+  return defaultOn;
+}
+
 static void applyDefaultsFromObj(JsonObjectConst d) {
   static const char *kTags[] = {"KS", "KQ", "Nasdaq", "USD"};
   for (const char *tag : kTags) {
@@ -426,18 +533,13 @@ static void applyDefaultsFromObj(JsonObjectConst d) {
       s->enabled = true;
       continue;
     }
-    JsonVariantConst v = d[tag];
-    if (v.is<bool>())
-      s->enabled = v.as<bool>();
-    else if (v.is<int>() || v.is<long>())
-      s->enabled = v.as<int>() != 0;
-    else
-      s->enabled = true;
+    s->enabled = jsonFlagOn(d[tag], true);
   }
 }
 
 static bool loadConfigFromNvs(void) {
   resetDefaultSlots();
+  marketVisible = true;
 
   Preferences prefs;
   prefs.begin(kPrefsNs, true);
@@ -454,9 +556,11 @@ static bool loadConfigFromNvs(void) {
   if (err) {
     Serial.printf("market cfg: NVS JSON %s — using defaults\n", err.c_str());
     resetDefaultSlots();
+    marketVisible = true;
     return false;
   }
 
+  marketVisible = jsonFlagOn(doc["v"], true);
   applyDefaultsFromObj(doc["d"].as<JsonObjectConst>());
 
   JsonArrayConst customs = doc["c"].as<JsonArrayConst>();
@@ -487,8 +591,9 @@ static bool loadConfigFromNvs(void) {
     }
   }
 
-  Serial.printf("market cfg: loaded slots=%u enabled=%u\n", (unsigned)slotCount,
-                (unsigned)countEnabled());
+  Serial.printf("market cfg: loaded slots=%u enabled=%u visible=%d\n",
+                (unsigned)slotCount, (unsigned)countEnabled(),
+                (int)marketVisible);
   return true;
 }
 
@@ -496,7 +601,9 @@ bool marketConfigGetJson(String &out) {
   if (slotCount == 0)
     loadConfigFromNvs();
 
-  out = "{\"d\":{";
+  out = "{\"v\":";
+  out += marketVisible ? '1' : '0';
+  out += ",\"d\":{";
   bool firstDef = true;
   for (size_t i = 0; i < slotCount; ++i) {
     if (!slots[i].isDefault)
@@ -569,16 +676,13 @@ bool marketConfigApplyJson(const char *json, String *errMsg) {
     s.isDefault = true;
   };
 
+  const bool nextVisible = jsonFlagOn(doc["v"], true);
+
   JsonObjectConst d = doc["d"].as<JsonObjectConst>();
   auto defOn = [&](const char *tag) -> bool {
     if (d.isNull() || !d[tag].is<JsonVariantConst>())
       return true;
-    JsonVariantConst v = d[tag];
-    if (v.is<bool>())
-      return v.as<bool>();
-    if (v.is<int>() || v.is<long>())
-      return v.as<int>() != 0;
-    return true;
+    return jsonFlagOn(d[tag], true);
   };
 
   addDef("KS", "KOSPI", MARKET_KIND_DOMESTIC_INDEX, defOn("KS"));
@@ -629,12 +733,15 @@ bool marketConfigApplyJson(const char *json, String *errMsg) {
 
   memcpy(slots, next, sizeof(slots));
   slotCount = nextCount;
+  if (nextVisible != marketVisible)
+    visibilityChanged = true;
+  marketVisible = nextVisible;
 
   if (!saveConfigToNvs())
     return fail("NVS write failed");
 
-  Serial.printf("market cfg: saved slots=%u enabled=%u\n", (unsigned)slotCount,
-                (unsigned)enabled);
+  Serial.printf("market cfg: saved slots=%u enabled=%u visible=%d\n",
+                (unsigned)slotCount, (unsigned)enabled, (int)marketVisible);
   if (errMsg)
     errMsg->clear();
   return true;
@@ -642,7 +749,15 @@ bool marketConfigApplyJson(const char *json, String *errMsg) {
 
 void marketFetchReloadFromNvs(void) { loadConfigFromNvs(); }
 
+static void waitOutWifiScan(void) {
+  // A portal /scan holds the Wi‑Fi driver. HTTPS during that stretch times out
+  // and stalls the chip; wait it out on this task only.
+  while (WiFi.scanComplete() == WIFI_SCAN_RUNNING)
+    vTaskDelay(pdMS_TO_TICKS(50));
+}
+
 static size_t runFetchPass(void) {
+  waitOutWifiScan();
   size_t got = 0;
 
   bool ksOn = false, kqOn = false;
@@ -690,20 +805,28 @@ static size_t runFetchPass(void) {
 static void marketWorker(void * /*arg*/) {
   for (;;) {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-    if (WiFi.status() != WL_CONNECTED) {
-      Serial.println("market fetch: bg skip (no STA)");
+    fetchBusy = true;
+    fetchQueued = false;
+    if (!marketVisible) {
+      fetchBusy = false;
+      Serial.println("market fetch: bg skip (hidden)");
       continue;
     }
-    if (fetchBusy) {
-      // Sync boot/ingest fetch in progress — try again shortly.
-      vTaskDelay(pdMS_TO_TICKS(200));
-      xTaskNotifyGive(marketTaskHandle);
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("market fetch: bg skip (no STA)");
+      fetchBusy = false;
+      continue;
+    }
+    // Weather used to run on the UI task (8s HTTP timeout) and froze the clock.
+    weatherFetchOnce();
+    if (!marketVisible) {
+      fetchBusy = false;
+      Serial.println("market fetch: bg skip quotes (hidden)");
       continue;
     }
     while (pendingReady)
       vTaskDelay(pdMS_TO_TICKS(20));
 
-    fetchBusy = true;
     MarketQuote built[MARKET_MAX_QUOTES];
     size_t builtCount = 0;
     setStoreTarget(built, &builtCount);
@@ -725,6 +848,7 @@ static void marketWorker(void * /*arg*/) {
 void marketFetchBegin(void) {
   hasData = false;
   updatedFlag = false;
+  visibilityChanged = false;
   pendingReady = false;
   pendingCount = 0;
   setStoreTarget(quotes, &quoteCount);
@@ -739,8 +863,23 @@ void marketFetchBegin(void) {
 }
 
 void marketFetchRequestRefresh(void) {
-  if (marketTaskHandle)
-    xTaskNotifyGive(marketTaskHandle);
+  if (!marketTaskHandle)
+    return;
+  if (WiFi.status() != WL_CONNECTED)
+    return;
+  fetchQueued = true;
+  xTaskNotifyGive(marketTaskHandle);
+}
+
+bool marketFetchBusy(void) { return fetchQueued || fetchBusy; }
+
+bool marketConfigIsVisible(void) { return marketVisible; }
+
+bool marketConfigTakeVisibilityChanged(void) {
+  if (!visibilityChanged)
+    return false;
+  visibilityChanged = false;
+  return true;
 }
 
 void marketFetchService(void) {
@@ -771,45 +910,11 @@ bool marketFetchGetAt(size_t index, MarketQuote *out) {
   return true;
 }
 
-bool marketFetchOnce(void) {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("market fetch: not connected");
-    return false;
-  }
-
-  if (slotCount == 0)
-    loadConfigFromNvs();
-
-  // Wait briefly if background publish is mid-flight.
-  for (int i = 0; i < 50 && fetchBusy; ++i)
-    vTaskDelay(pdMS_TO_TICKS(20));
-
-  MarketQuote prev[MARKET_MAX_QUOTES];
-  const size_t prevCount = quoteCount;
-  memcpy(prev, quotes, sizeof(prev));
-
-  fetchBusy = true;
-  setStoreTarget(quotes, &quoteCount);
-  const size_t got = runFetchPass();
-  fetchBusy = false;
-
-  if (got == 0) {
-    memcpy(quotes, prev, sizeof(quotes));
-    quoteCount = prevCount;
-    Serial.println("market fetch: all requests failed");
-    return false;
-  }
-
-  hasData = true;
-  updatedFlag = true;
-  return true;
-}
-
 #else
 
 void marketFetchBegin(void) {}
-bool marketFetchOnce(void) { return false; }
 void marketFetchRequestRefresh(void) {}
+bool marketFetchBusy(void) { return false; }
 void marketFetchService(void) {}
 bool marketFetchHasData(void) { return false; }
 bool marketFetchTakeUpdated(void) { return false; }
@@ -817,7 +922,7 @@ size_t marketFetchCount(void) { return 0; }
 bool marketFetchGetAt(size_t, MarketQuote *) { return false; }
 void marketFetchReloadFromNvs(void) {}
 bool marketConfigGetJson(String &out) {
-  out = "{\"d\":{\"KS\":1,\"KQ\":1,\"Nasdaq\":1,\"USD\":1},\"c\":[]}";
+  out = "{\"v\":1,\"d\":{\"KS\":1,\"KQ\":1,\"Nasdaq\":1,\"USD\":1},\"c\":[]}";
   return true;
 }
 bool marketConfigApplyJson(const char *, String *errMsg) {
@@ -825,5 +930,7 @@ bool marketConfigApplyJson(const char *, String *errMsg) {
     *errMsg = "unavailable";
   return false;
 }
+bool marketConfigIsVisible(void) { return true; }
+bool marketConfigTakeVisibilityChanged(void) { return false; }
 
 #endif

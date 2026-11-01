@@ -57,7 +57,7 @@ Six-pin modules also have **CSB** / **SDO** (sometimes silk **CSR** / **SDK**). 
 - Climate ingest deploy targets: **local** (this Mac) vs **prod** (Ubuntu) via gitignored `include/ingest_config_*.h`
 - Live indoor T/RH from BME280 on `ui_temp*` / `ui_humid`
 - Outdoor weather via **OpenWeather Current Weather API 2.5** → `ui_current_temp`, `ui_current_humid`, image `ui_weather` (free-tier key; One Call 3.0/4.0 need a paid plan)
-- Market ticker via **Naver Finance** (unofficial JSON) → scrolling Label `ui_market`: defaults **KS** / **KQ** / **Nasdaq** / **USD**, plus optional custom tickers from the config portal. Up = red, down = blue, flat = white
+- Market ticker → scrolling Label `ui_market`: defaults **KS** / **KQ** / **Nasdaq** / **USD**, plus optional custom tickers from the config portal. **KS/KQ/USD** (+ custom) from **Naver Finance**; **Nasdaq** from **Yahoo** (`^IXIC`). Up = red, down = blue, flat = white
 
 **SquareLine outdoor weather**
 
@@ -70,7 +70,7 @@ Six-pin modules also have **CSB** / **SDO** (sometimes silk **CSR** / **SDK**). 
 - Widget: Label `ui_market` (fixed width ~220–240 px, long mode **Scroll circular**, recolor on)
 - Firmware overwrites text with colored segments, e.g. `KS 5730.74 -3.48%  KQ 724.38 -3.83%  Nasdaq 25437.00 -2.86%  USD 1335.80 -0.35%`
 - Refreshes on boot (if STA up) and on the same ~10 min climate wake as weather
-- **Config portal → Market**: toggle default KS/KQ/Nasdaq/USD; add custom rows with English **Name** + Naver **Code** (e.g. `Samsung` / `005930`). Max 4 custom, 8 quotes total. Stored in NVS namespace `market`. Custom marquee uses the Name you enter (`Samsung 220,500 -5.17%`). Code kinds: 6-digit stock, `KOSPI`/`KOSDAQ`/`KPI200`, world index (`.IXIC`), FX (`FX_USDKRW`)
+- **Config portal → Stock Market**: switch hides/shows the home scrollbar immediately; toggle default KS/KQ/Nasdaq/USD; add custom rows with English **Name** + Naver **Code** (e.g. `Samsung` / `005930`). Max 4 custom, 8 quotes total. Stored in NVS namespace `market`. Custom marquee uses the Name you enter (`Samsung 220,500 -5.17%`). Code kinds: 6-digit stock, `KOSPI`/`KOSDAQ`/`KPI200`, world index (`.IXIC`), FX (`FX_USDKRW`)
 
 **Checkup**
 

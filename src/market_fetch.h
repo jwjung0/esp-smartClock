@@ -25,12 +25,10 @@ typedef struct {
 
 void marketFetchBegin(void);
 
-// HTTPS GETs Naver Finance quotes while STA is connected (blocking).
-// Use at boot / ingest wake only — not from the HTTP/UI path.
-bool marketFetchOnce(void);
-
-// Queue a background refetch (portal save). Non-blocking.
+// Queue a background refetch. Never blocks the UI task.
 void marketFetchRequestRefresh(void);
+// True while a background fetch is queued or running.
+bool marketFetchBusy(void);
 // Apply finished background results on the LVGL/main loop.
 void marketFetchService(void);
 
@@ -49,4 +47,6 @@ bool marketConfigGetJson(String &out);
 // Apply JSON from portal; on success persists NVS and reloads slots.
 // Optional errMsg receives a short reason on failure.
 bool marketConfigApplyJson(const char *json, String *errMsg);
+bool marketConfigIsVisible(void);
+bool marketConfigTakeVisibilityChanged(void);
 #endif

@@ -13,7 +13,7 @@
 #include <string.h>
 
 static bool hasData = false;
-static bool updatedFlag = false;
+static volatile bool updatedFlag = false;
 static float cachedTempC = NAN;
 static float cachedHumidityPct = NAN;
 static char cachedMain[16] = "";

@@ -6,16 +6,21 @@ typedef void (*WifiConfigIdleCb)(void);
 
 void wifiConfigSetIdleCallback(WifiConfigIdleCb cb);
 void wifiConfigBegin();
+// No-op: DNS/HTTP run on the portal FreeRTOS task after wifiConfigBegin().
 void wifiConfigLoop();
+// Cached on the portal task. The clock loop must not call into the Wi‑Fi stack.
 bool wifiConfigIsConnected();
 bool wifiConfigIsRadioOn();
 bool wifiConfigSoftApActive();
 IPAddress wifiConfigLocalIp();
 IPAddress wifiConfigSoftApIp();
 
-// Power policy: radio off when idle; brief STA wake for NTP (no portal).
+// Queue only — return immediately. Portal task performs the radio change.
 void wifiConfigRadioOff();
-bool wifiConfigWakeStaForSync();
+// False when no saved SSID (no Wi‑Fi call). Otherwise queues STA join.
+bool wifiConfigRequestWake();
+// True when no radio command is queued or running.
+bool wifiConfigCmdIdle();
 
 // RGB 0xRRGGBB (SquareLine defaults if unset)
 uint32_t wifiConfigDateColor();

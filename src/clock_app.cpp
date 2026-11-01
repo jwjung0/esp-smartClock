@@ -14,6 +14,8 @@
 #include <lvgl.h>
 #include <TFT_eSPI.h>
 #include <ui.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 static const uint16_t kScreenW = 240;
 static const uint16_t kScreenH = 240;
@@ -541,8 +543,21 @@ static void formatPriceWithCommas(float price, char *out, size_t outLen) {
     out[used < outLen ? used : outLen - 1] = '\0';
 }
 
+static void applyMarketVisibility() {
+  if (!ui_market)
+    return;
+  if (marketConfigIsVisible())
+    lv_obj_clear_flag(ui_market, LV_OBJ_FLAG_HIDDEN);
+  else
+    lv_obj_add_flag(ui_market, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void updateMarketUi() {
   if (!ui_market)
+    return;
+
+  applyMarketVisibility();
+  if (!marketConfigIsVisible())
     return;
 
   lv_label_set_recolor(ui_market, true);
@@ -733,8 +748,10 @@ static void showHome() {
   // During portal Connect / scan waits, wifiIdle() keeps the clock moving.
   wifiConfigSetIdleCallback(homeUiPump);
   // Apply ticker after home is the active screen so circular scroll starts.
+  applyMarketVisibility();
   updateMarketUi();
   (void)marketFetchTakeUpdated();
+  (void)marketConfigTakeVisibilityChanged();
   lvglPump();
 }
 
@@ -744,7 +761,6 @@ static void waitForNtp() {
   setLoadingCreepCeiling(70);
   const uint32_t start = millis();
   while (!timeSyncIsReady() && (millis() - start) < kNtpWaitMs) {
-    wifiConfigLoop();
     loadingPump();
   }
   setLoadingProgress(75, true);
@@ -764,37 +780,64 @@ static void closeBootConfigWindow() {
   Serial.println("Boot config window closed (10 min)");
 }
 
-static void runDailyNtpSync() {
-  Serial.println("Daily NTP sync…");
-  if (!wifiConfigWakeStaForSync()) {
-    nextNtpSyncMs = millis() + kDailySyncMs;
+enum class NtpPhase : uint8_t { Idle, Waking, Waiting };
+
+static NtpPhase ntpPhase = NtpPhase::Idle;
+static uint32_t ntpWaitStartMs = 0;
+static time_t ntpEpochBefore = 0;
+static bool ntpHadTime = false;
+
+static void serviceDailyNtp() {
+  if (ntpPhase == NtpPhase::Idle) {
+    if ((int32_t)(millis() - nextNtpSyncMs) < 0)
+      return;
+    Serial.println("Daily NTP sync…");
+    if (!wifiConfigRequestWake()) {
+      nextNtpSyncMs = millis() + kDailySyncMs;
+      return;
+    }
+    ntpPhase = NtpPhase::Waking;
     return;
   }
 
-  timeSyncRequestResync();
-  const uint32_t start = millis();
-  struct tm before;
-  const bool hadTime = getLocalTime(&before, 0);
-  const time_t t0 = hadTime ? mktime(&before) : 0;
-
-  while ((millis() - start) < kNtpWaitMs) {
-    homeUiPump();
-    struct tm nowTm;
-    if (getLocalTime(&nowTm, 0)) {
-      const time_t t1 = mktime(&nowTm);
-      // Accept any valid time after a short settle, or a changed epoch.
-      if (!hadTime || t1 != t0 || (millis() - start) > 3000)
-        break;
+  if (ntpPhase == NtpPhase::Waking) {
+    if (!wifiConfigCmdIdle())
+      return;
+    if (!wifiConfigIsConnected()) {
+      ntpPhase = NtpPhase::Idle;
+      nextNtpSyncMs = millis() + kDailySyncMs;
+      return;
     }
+    timeSyncRequestResync();
+    struct tm before;
+    ntpHadTime = getLocalTime(&before, 0);
+    ntpEpochBefore = ntpHadTime ? mktime(&before) : 0;
+    ntpWaitStartMs = millis();
+    ntpPhase = NtpPhase::Waiting;
+    return;
   }
 
+  struct tm nowTm;
+  bool done = (millis() - ntpWaitStartMs) >= kNtpWaitMs;
+  if (!done && getLocalTime(&nowTm, 0)) {
+    const time_t t1 = mktime(&nowTm);
+    if (!ntpHadTime || t1 != ntpEpochBefore ||
+        (millis() - ntpWaitStartMs) > 3000)
+      done = true;
+  }
+  if (!done)
+    return;
+
   wifiConfigRadioOff();
-  updateWifiIcon();
+  ntpPhase = NtpPhase::Idle;
   nextNtpSyncMs = millis() + kDailySyncMs;
   Serial.println("Daily NTP sync done; WiFi off");
 }
 
 void clockAppSetup() {
+  // UI preempts the portal task (priority 1), especially on unicore S2 Mini.
+  vTaskPrioritySet(NULL, 3);
+
   // Hold backlight off before anything else — TFT_eSPI used to force it on
   // during ST7789 init while GRAM was still white.
   setBacklight(false);
@@ -870,24 +913,19 @@ void clockAppSetup() {
   bmeSensorBegin();
   weatherFetchBegin();
   marketFetchBegin();
-  // Startup fetch while STA is up (do not wait for the 15s ingest wake).
-  if (wifiConfigIsConnected()) {
-    showLoading("Fetching weather...");
-    setLoadingProgress(75, true);
-    setLoadingCreepCeiling(90);
-    const uint32_t weatherUiStart = millis();
-    while (millis() - weatherUiStart < 400)
-      loadingPump();
-    weatherFetchOnce();
-
+  // Startup only: stay on the loading screen until quotes are in hand.
+  // Later refreshes stay on the market task and paint when ready.
+  if (wifiConfigIsConnected() && marketConfigIsVisible()) {
     showLoading("Fetching market...");
-    setLoadingProgress(88, true);
+    setLoadingProgress(80, true);
     setLoadingCreepCeiling(95);
-    loadingPump();
-    if (!marketFetchOnce()) {
-      Serial.println("market fetch: boot retry");
+    marketFetchRequestRefresh();
+    const uint32_t marketWaitStart = millis();
+    const uint32_t kBootMarketWaitMs = 30000;
+    while (!marketFetchHasData() &&
+           (millis() - marketWaitStart) < kBootMarketWaitMs) {
+      marketFetchService();
       loadingPump();
-      marketFetchOnce();
     }
   }
   dataIngestBegin();
@@ -920,20 +958,29 @@ void clockAppLoop() {
 
   if (wifiConfigTakeColorsChanged())
     applyClockColors();
+  if (marketConfigTakeVisibilityChanged()) {
+    applyMarketVisibility();
+    if (marketConfigIsVisible())
+      updateMarketUi();
+  }
 
   lv_timer_handler();
 
+  // Portal DNS/HTTP runs on its own task — do not call wifiConfigLoop here.
   if (bootConfigOpen) {
-    wifiConfigLoop();
     if ((int32_t)(millis() - bootConfigUntilMs) >= 0)
       closeBootConfigWindow();
-  } else if ((int32_t)(millis() - nextNtpSyncMs) >= 0) {
-    runDailyNtpSync();
+  } else {
+    serviceDailyNtp();
   }
 
   marketFetchService();
 
   dataIngestLoop(!bootConfigOpen);
+  if (dataIngestTakeRadioOff()) {
+    wifiConfigRadioOff();
+    updateWifiIcon();
+  }
   if (onHomeScreen && weatherFetchTakeUpdated())
     updateOutdoorWeatherUi();
   if (onHomeScreen && marketFetchTakeUpdated())

@@ -4,11 +4,12 @@
 
 #include "bme_sensor.h"
 #include "market_fetch.h"
-#include "weather_fetch.h"
 #include "wifi_config.h"
 
 #include <HTTPClient.h>
 #include <WiFi.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <time.h>
 
 #if defined(INGEST_ENV_LOCAL)
@@ -23,6 +24,14 @@ static const uint32_t INTERVAL_MS = 10UL * 60UL * 1000UL; // 10min
 static const uint32_t RETRY_MS = 60UL * 1000UL;           // 60s
 
 static uint32_t nextPostMs = 0;
+static volatile bool deferRadioOff = false;
+static volatile uint32_t deferRadioOffSinceMs = 0;
+static volatile bool postBusy = false;
+static bool ingestWaking = false;
+static bool postSensorOk = false;
+static float postTempC = 0;
+static float postHumidity = 0;
+static bool postAllowRadioOff = false;
 // After a failed read/post, one 30s retry then back to 10 min.
 static bool awaitingQuickRetry = false;
 
@@ -94,30 +103,11 @@ void dataIngestBegin() {
 #endif
 }
 
-void dataIngestLoop(bool allowRadioOff) {
-  if ((int32_t)(millis() - nextPostMs) < 0) {
-    return;
-  }
-
-  if (!wifiConfigIsConnected()) {
-    // During boot config, SoftAP may be up — do not tear it down for ingest.
-    if (!allowRadioOff) {
-      scheduleNext(true);
-      return;
-    }
-    if (!wifiConfigWakeStaForSync()) {
-      Serial.println("data ingest: WiFi wake failed; retry once or wait 10 min");
-      scheduleNext(true);
-      return;
-    }
-  }
-
-  float t = 0, h = 0, p = 0;
-  const bool sensorOk = bmeSensorRead(&t, &h, &p);
+static void ingestNetTask(void * /*arg*/) {
+  const bool sensorOk = postSensorOk;
+  const float t = postTempC;
+  const float h = postHumidity;
   const bool postOk = postReading(sensorOk, t, h);
-  // Same Wi‑Fi session: outdoor OpenWeather + market ticker after ingest POST.
-  const bool weatherOk = weatherFetchOnce();
-  const bool marketOk = marketFetchOnce();
 
   if (postOk && sensorOk) {
     scheduleNext(false);
@@ -136,21 +126,79 @@ void dataIngestLoop(bool allowRadioOff) {
       Serial.println("data ingest HTTP failed; retry soon");
   }
 
-  if (!weatherOk && postOk && sensorOk) {
-    Serial.println("weather fetch failed; will retry on next ingest wake");
+  // Weather + quotes on the market task (not this one, not the UI).
+  marketFetchRequestRefresh();
+  if (postAllowRadioOff) {
+    deferRadioOff = true;
+    deferRadioOffSinceMs = millis();
   }
-  if (!marketOk && postOk && sensorOk) {
-    Serial.println("market fetch failed; will retry on next ingest wake");
+  postBusy = false;
+  vTaskDelete(nullptr);
+}
+
+void dataIngestLoop(bool allowRadioOff) {
+  // Boot config window: leave the radio to the portal. No HTTP here.
+  if (!allowRadioOff) {
+    ingestWaking = false;
+    if ((int32_t)(millis() - nextPostMs) >= 0)
+      nextPostMs = millis() + 5000;
+    return;
+  }
+  if (postBusy)
+    return;
+
+  if (ingestWaking) {
+    if (!wifiConfigCmdIdle())
+      return;
+    ingestWaking = false;
+    if (!wifiConfigIsConnected()) {
+      Serial.println("data ingest: WiFi wake failed; retry once or wait 10 min");
+      scheduleNext(true);
+      return;
+    }
+  } else if ((int32_t)(millis() - nextPostMs) < 0) {
+    return;
+  } else if (!wifiConfigIsConnected()) {
+    if (!wifiConfigRequestWake()) {
+      Serial.println("data ingest: WiFi wake skipped; retry later");
+      scheduleNext(true);
+      return;
+    }
+    ingestWaking = true;
+    return;
   }
 
-  if (allowRadioOff) {
-    wifiConfigRadioOff();
+  float t = 0, h = 0, p = 0;
+  postSensorOk = bmeSensorRead(&t, &h, &p);
+  postTempC = t;
+  postHumidity = h;
+  postAllowRadioOff = true;
+  (void)p;
+  postBusy = true;
+  // Hold the slot until the task schedules the real next time.
+  nextPostMs = millis() + INTERVAL_MS;
+
+  if (xTaskCreatePinnedToCore(ingestNetTask, "ingest", 10240, nullptr, 1,
+                              nullptr, 0) != pdPASS) {
+    postBusy = false;
+    scheduleNext(true);
+    Serial.println("data ingest: task create failed");
   }
+}
+
+bool dataIngestTakeRadioOff(void) {
+  if (!deferRadioOff)
+    return false;
+  if (marketFetchBusy() && (millis() - deferRadioOffSinceMs) < 30000)
+    return false;
+  deferRadioOff = false;
+  return true;
 }
 
 #else
 
 void dataIngestBegin() {}
 void dataIngestLoop(bool /*allowRadioOff*/) {}
+bool dataIngestTakeRadioOff(void) { return false; }
 
 #endif

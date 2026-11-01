@@ -11,6 +11,8 @@
 #include <WiFi.h>
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 static Preferences prefs;
 static WebServer server(80);
@@ -20,15 +22,32 @@ static bool softApActive = false;
 static bool httpStarted = false;
 static bool colorsChanged = false;
 static WifiConfigIdleCb idleCb = nullptr;
+static TaskHandle_t portalTaskHandle = nullptr;
+static bool portalTaskStarted = false;
 
+enum class PortalCmd : uint8_t { None = 0, RadioOff, WakeSta };
+static volatile PortalCmd portalPending = PortalCmd::None;
+static volatile bool portalBusy = false;
+// Written only by the portal task (and once at the end of wifiConfigBegin).
+static volatile bool cachedStaUp = false;
+static volatile bool cachedRadioOn = false;
+
+// After the portal task owns WiFi/HTTP, never pump LVGL from wifiIdle —
+// connectSta/handleConnect may run on that task.
 static void wifiIdle() {
-  if (idleCb)
+  if (!portalTaskStarted && idleCb)
     idleCb();
   else {
     delay(5);
     yield();
   }
 }
+
+static void publishLinkFlags() {
+  cachedStaUp = WiFi.status() == WL_CONNECTED;
+  cachedRadioOn = WiFi.getMode() != WIFI_OFF;
+}
+
 static String apSsid;
 static String statusMsg;
 static uint32_t dateColor = 0xEFFA5C;
@@ -217,6 +236,10 @@ static void handleRoot() {
             "padding:1rem 1rem 1.15rem;margin:1rem 0}"
             ".box h1{font-size:1.15rem;margin:0 0 .85rem;padding-bottom:.65rem;"
             "border-bottom:1px solid #333;font-weight:600}"
+            ".box-head{display:flex;align-items:center;justify-content:space-between;"
+            "gap:.75rem;margin:0 0 .85rem;padding-bottom:.65rem;"
+            "border-bottom:1px solid #333}"
+            ".box-head h1{margin:0;padding:0;border:none;font-size:1.15rem;font-weight:600}"
             "label{display:block;margin:.75rem 0 .25rem}"
             "input,select,button{width:100%;box-sizing:border-box;padding:.6rem;"
             "font-size:1rem;border-radius:.4rem;border:1px solid #444;"
@@ -235,6 +258,19 @@ static void handleRoot() {
             ".chk{display:flex;align-items:center;gap:.6rem;margin:.45rem 0;"
             "font-size:.95rem}"
             ".chk input{width:auto;margin:0}"
+            ".switch{position:relative;display:inline-block;width:3.1rem;height:1.75rem;"
+            "flex:0 0 auto}"
+            ".switch input{opacity:0;width:0;height:0;position:absolute}"
+            ".slider{position:absolute;cursor:pointer;inset:0;background:#444;"
+            "border-radius:999px;transition:background .2s}"
+            ".slider:before{position:absolute;content:\"\";height:1.35rem;width:1.35rem;"
+            "left:.2rem;top:.2rem;background:#eee;border-radius:50%;"
+            "transition:transform .2s}"
+            ".switch input:checked+.slider{background:#0af}"
+            ".switch input:checked+.slider:before{transform:translateX(1.35rem)}"
+            ".mkt-body{transition:opacity .2s}"
+            ".mkt-body.dim{opacity:.38;pointer-events:none}"
+            ".mkt-body.dim button{background:#555;color:#999}"
             ".mkt-add{display:grid;grid-template-columns:1fr 1fr auto;gap:.4rem;"
             "align-items:end;margin-top:.5rem}"
             ".mkt-add label{margin:0}"
@@ -334,10 +370,17 @@ static void handleRoot() {
 
   String marketJson;
   if (!marketConfigGetJson(marketJson))
-    marketJson = F("{\"d\":{\"KS\":1,\"KQ\":1,\"Nasdaq\":1,\"USD\":1},\"c\":[]}");
+    marketJson =
+        F("{\"v\":1,\"d\":{\"KS\":1,\"KQ\":1,\"Nasdaq\":1,\"USD\":1},\"c\":[]}");
 
   html += F("<section class=box>"
-            "<h1>Market</h1>"
+            "<div class=box-head>"
+            "<h1>Stock Market</h1>"
+            "<label class=switch title=\"Stock Market on/off\">"
+            "<input type=checkbox id=mkt_vis checked>"
+            "<span class=slider></span>"
+            "</label></div>"
+            "<div class=mkt-body id=mkt_body>"
             "<div class=chk><label><input type=checkbox id=mkt_KS> KS (KOSPI)</label></div>"
             "<div class=chk><label><input type=checkbox id=mkt_KQ> KQ (KOSDAQ)</label></div>"
             "<div class=chk><label><input type=checkbox id=mkt_Nasdaq> Nasdaq</label></div>"
@@ -352,7 +395,8 @@ static void handleRoot() {
             "<button type=button id=mkt_add>Add</button>"
             "</div>"
             "<ul class=mkt-list id=mkt_list></ul>"
-            "<button type=button id=mkt_save>Save market</button>"
+            "<button type=button id=mkt_save>Save</button>"
+            "</div>"
             "<p class=msg id=mkt_msg style=\"display:none\"></p>"
             "</section>");
 
@@ -464,7 +508,30 @@ static void handleRoot() {
             "const MKT=");
   html += marketJson;
   html += F(";"
+            "if(typeof MKT.v==='undefined')MKT.v=1;"
+            "function mktCollect(){"
+            "MKT.v=document.getElementById('mkt_vis').checked?1:0;"
+            "MKT.d={KS:0,KQ:0,Nasdaq:0,USD:0};"
+            "['KS','KQ','Nasdaq','USD'].forEach(k=>{"
+            "MKT.d[k]=document.getElementById('mkt_'+k).checked?1:0;});"
+            "if(!MKT.c)MKT.c=[];}"
+            "function mktPost(doneMsg){"
+            "mktCollect();"
+            "fetch('/market',{method:'POST',headers:{'Content-Type':'application/json'},"
+            "body:JSON.stringify(MKT)}).then(r=>r.json()).then(j=>{"
+            "if(j&&j.ok){mktMsg(doneMsg||'Saved',true);}else{mktMsg((j&&j.err)||'Save failed',false);}"
+            "}).catch(()=>mktMsg('Save failed',false));}"
+            "function mktSyncBody(){"
+            "const on=!!document.getElementById('mkt_vis').checked;"
+            "const body=document.getElementById('mkt_body');"
+            "if(body)body.classList.toggle('dim',!on);"
+            "['mkt_KS','mkt_KQ','mkt_Nasdaq','mkt_USD','mkt_name','mkt_code',"
+            "'mkt_add','mkt_save'].forEach(id=>{"
+            "const el=document.getElementById(id);if(el)el.disabled=!on;});"
+            "document.querySelectorAll('#mkt_list button').forEach(b=>{b.disabled=!on;});}"
             "function mktRender(){"
+            "const vis=document.getElementById('mkt_vis');"
+            "if(vis)vis.checked=!!Number(MKT.v);"
             "['KS','KQ','Nasdaq','USD'].forEach(k=>{"
             "const el=document.getElementById('mkt_'+k);"
             "if(el)el.checked=!!(MKT.d&&Number(MKT.d[k]));});"
@@ -473,12 +540,17 @@ static void handleRoot() {
             "const li=document.createElement('li');"
             "li.innerHTML='<span>'+row.t+' <span class=color-hex>('+row.c+')</span></span>';"
             "const b=document.createElement('button');b.type='button';b.textContent='Remove';"
-            "b.addEventListener('click',()=>{MKT.c.splice(i,1);mktRender();});"
-            "li.appendChild(b);ul.appendChild(li);});}"
+            "b.addEventListener('click',()=>{if(b.disabled)return;MKT.c.splice(i,1);mktRender();});"
+            "li.appendChild(b);ul.appendChild(li);});"
+            "mktSyncBody();}"
             "function mktMsg(t,ok){"
             "const m=document.getElementById('mkt_msg');"
             "m.style.display='block';m.style.color=ok?'#7d7':'#effa5c';m.textContent=t;}"
+            "document.getElementById('mkt_vis').addEventListener('change',()=>{"
+            "mktSyncBody();"
+            "mktPost(document.getElementById('mkt_vis').checked?'Stock Market On':'Stock Market Off');});"
             "document.getElementById('mkt_add').addEventListener('click',()=>{"
+            "if(document.getElementById('mkt_add').disabled)return;"
             "const t=document.getElementById('mkt_name').value.trim();"
             "const c=document.getElementById('mkt_code').value.trim();"
             "if(!t||!c){mktMsg('Name and code required',false);return;}"
@@ -489,42 +561,72 @@ static void handleRoot() {
             "MKT.c.push({t:t,c:c});"
             "document.getElementById('mkt_name').value='';"
             "document.getElementById('mkt_code').value='';"
-            "mktRender();mktMsg('Added — tap Save market',true);});"
+            "mktRender();mktMsg('Added — tap Save',true);});"
             "document.getElementById('mkt_save').addEventListener('click',()=>{"
-            "MKT.d={KS:0,KQ:0,Nasdaq:0,USD:0};"
-            "['KS','KQ','Nasdaq','USD'].forEach(k=>{"
-            "MKT.d[k]=document.getElementById('mkt_'+k).checked?1:0;});"
-            "fetch('/market',{method:'POST',headers:{'Content-Type':'application/json'},"
-            "body:JSON.stringify(MKT)}).then(r=>r.json()).then(j=>{"
-            "if(j&&j.ok){mktMsg('Saved',true);}else{mktMsg((j&&j.err)||'Save failed',false);}"
-            "}).catch(()=>mktMsg('Save failed',false));});"
+            "if(document.getElementById('mkt_save').disabled)return;"
+            "mktPost('Saved');});"
             "mktRender();"
             "</script></body></html>");
 
   server.send(200, "text/html", html);
 }
 
+static String scanCache = "[]";
+static uint32_t scanStartedMs = 0;
+static uint32_t scanFinishedMs = 0;
+static bool scanInFlight = false;
+
 static void handleScan() {
-  yield();
-  const int n = WiFi.scanNetworks(/*async=*/false, /*hidden=*/true);
-  String json = "[";
-  for (int i = 0; i < n; ++i) {
-    if (i)
-      json += ',';
-    String ssid = WiFi.SSID(i);
-    ssid.replace("\\", "\\\\");
-    ssid.replace("\"", "\\\"");
-    json += "{\"ssid\":\"";
-    json += ssid;
-    json += "\",\"rssi\":";
-    json += String(WiFi.RSSI(i));
-    json += ",\"open\":";
-    json += (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? "true" : "false";
-    json += '}';
+  // One scan per page open. The page polls /scan many times; restarting a
+  // scan on every empty/failed poll locks the Wi‑Fi driver (and the LCD)
+  // for tens of seconds.
+  const int16_t st = WiFi.scanComplete();
+  if (st == WIFI_SCAN_RUNNING) {
+    server.send(200, "application/json", "[]");
+    return;
   }
-  json += ']';
-  WiFi.scanDelete();
-  server.send(200, "application/json", json);
+
+  if (st >= 0) {
+    String json = "[";
+    for (int i = 0; i < st; ++i) {
+      if (i)
+        json += ',';
+      String ssid = WiFi.SSID(i);
+      ssid.replace("\\", "\\\\");
+      ssid.replace("\"", "\\\"");
+      json += "{\"ssid\":\"";
+      json += ssid;
+      json += "\",\"rssi\":";
+      json += String(WiFi.RSSI(i));
+      json += ",\"open\":";
+      json += (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? "true" : "false";
+      json += '}';
+    }
+    json += ']';
+    scanCache = json;
+    scanInFlight = false;
+    scanFinishedMs = millis();
+    WiFi.scanDelete();
+    server.send(200, "application/json", scanCache);
+    return;
+  }
+
+  // Finished (even with zero APs) — keep serving the cache. An empty list
+  // makes the page poll again; starting another scan each time is the freeze.
+  if (scanFinishedMs && (millis() - scanFinishedMs) < 20000) {
+    server.send(200, "application/json", scanCache);
+    return;
+  }
+
+  if (scanInFlight && (millis() - scanStartedMs) < 20000) {
+    server.send(200, "application/json", scanCache);
+    return;
+  }
+
+  WiFi.scanNetworks(/*async=*/true, /*hidden=*/true);
+  scanInFlight = true;
+  scanStartedMs = millis();
+  server.send(200, "application/json", "[]");
 }
 
 static void handleConnect() {
@@ -582,7 +684,8 @@ static void handleColors() {
 static void handleMarketGet() {
   String json;
   if (!marketConfigGetJson(json))
-    json = F("{\"d\":{\"KS\":1,\"KQ\":1,\"Nasdaq\":1,\"USD\":1},\"c\":[]}");
+    json =
+        F("{\"v\":1,\"d\":{\"KS\":1,\"KQ\":1,\"Nasdaq\":1,\"USD\":1},\"c\":[]}");
   server.send(200, "application/json", json);
 }
 
@@ -621,7 +724,8 @@ static void setupHttpRoutes() {
   server.on("/hotspot-detect.html", HTTP_GET, handleCaptive);
   server.on("/connecttest.txt", HTTP_GET, handleCaptive);
   server.on("/ncsi.txt", HTTP_GET, handleCaptive);
-  server.onNotFound(handleRoot);
+  // Short 302 — do not rebuild the full config page for probes.
+  server.onNotFound(handleCaptive);
 }
 
 static void ensureHttp() {
@@ -634,6 +738,92 @@ static void ensureHttp() {
 }
 
 void wifiConfigSetIdleCallback(WifiConfigIdleCb cb) { idleCb = cb; }
+
+static void applyRadioOff() {
+  stopMdns();
+  stopSoftAp();
+  if (httpStarted) {
+    server.stop();
+    httpStarted = false;
+  }
+  WiFi.scanDelete();
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  publishLinkFlags();
+  Serial.println("WiFi radio off (config/NTP idle)");
+}
+
+static bool applyWakeSta() {
+  String ssid, pass;
+  loadCreds(ssid, pass);
+  if (!ssid.length()) {
+    Serial.println("WiFi wake skipped (no saved creds)");
+    return false;
+  }
+
+  stopSoftAp();
+  if (httpStarted) {
+    server.stop();
+    httpStarted = false;
+  }
+  stopMdns();
+  WiFi.scanDelete();
+
+  if (!connectSta(ssid, pass))
+    return false;
+
+  WiFi.mode(WIFI_STA);
+  publishLinkFlags();
+  Serial.println("WiFi wake for NTP sync");
+  return true;
+}
+
+static void portalWorker(void * /*arg*/) {
+  for (;;) {
+    const PortalCmd cmd = portalPending;
+    if (cmd != PortalCmd::None) {
+      portalPending = PortalCmd::None;
+      portalBusy = true;
+      if (cmd == PortalCmd::RadioOff)
+        applyRadioOff();
+      else if (cmd == PortalCmd::WakeSta)
+        (void)applyWakeSta();
+      publishLinkFlags();
+      portalBusy = false;
+    } else if (cachedRadioOn) {
+      if (softApActive)
+        dnsServer.processNextRequest();
+      if (httpStarted)
+        server.handleClient();
+      publishLinkFlags();
+    }
+    vTaskDelay(pdMS_TO_TICKS(2));
+  }
+}
+
+static void startPortalTask() {
+  if (portalTaskHandle)
+    return;
+  // HTTPS market worker is also on core 0; keep portal below UI priority.
+  xTaskCreatePinnedToCore(portalWorker, "portal", 12288, nullptr, 1,
+                          &portalTaskHandle, 0);
+  portalTaskStarted = true;
+  Serial.println("WiFi portal task started");
+}
+
+static void queuePortalCmd(PortalCmd cmd) {
+  if (!portalTaskStarted) {
+    portalBusy = true;
+    if (cmd == PortalCmd::RadioOff)
+      applyRadioOff();
+    else if (cmd == PortalCmd::WakeSta)
+      (void)applyWakeSta();
+    publishLinkFlags();
+    portalBusy = false;
+    return;
+  }
+  portalPending = cmd;
+}
 
 void wifiConfigBegin() {
   loadColors();
@@ -661,20 +851,19 @@ void wifiConfigBegin() {
   if (softApActive)
     Serial.printf("Join SoftAP \"%s\" → http://%s/\n", kApSsid,
                   WiFi.softAPIP().toString().c_str());
+
+  publishLinkFlags();
+  // Own DNS/HTTP/scan off the LVGL loop from here on.
+  startPortalTask();
 }
 
 void wifiConfigLoop() {
-  if (softApActive)
-    dnsServer.processNextRequest();
-  if (httpStarted)
-    server.handleClient();
+  // Portal task owns DNS/HTTP; kept for API compatibility.
 }
 
-bool wifiConfigIsConnected() { return WiFi.status() == WL_CONNECTED; }
+bool wifiConfigIsConnected() { return cachedStaUp; }
 
-bool wifiConfigIsRadioOn() {
-  return WiFi.getMode() != WIFI_OFF;
-}
+bool wifiConfigIsRadioOn() { return cachedRadioOn; }
 
 bool wifiConfigSoftApActive() { return softApActive; }
 
@@ -692,39 +881,21 @@ IPAddress wifiConfigSoftApIp() {
   return IPAddress();
 }
 
-void wifiConfigRadioOff() {
-  stopMdns();
-  stopSoftAp();
-  if (httpStarted) {
-    server.stop();
-    httpStarted = false;
-  }
-  WiFi.disconnect(true);
-  WiFi.mode(WIFI_OFF);
-  Serial.println("WiFi radio off (config/NTP idle)");
-}
+void wifiConfigRadioOff() { queuePortalCmd(PortalCmd::RadioOff); }
 
-bool wifiConfigWakeStaForSync() {
+bool wifiConfigRequestWake() {
   String ssid, pass;
   loadCreds(ssid, pass);
   if (!ssid.length()) {
     Serial.println("WiFi wake skipped (no saved creds)");
     return false;
   }
-
-  stopSoftAp();
-  if (httpStarted) {
-    server.stop();
-    httpStarted = false;
-  }
-  stopMdns();
-
-  if (!connectSta(ssid, pass))
-    return false;
-
-  WiFi.mode(WIFI_STA);
-  Serial.println("WiFi wake for NTP sync");
+  queuePortalCmd(PortalCmd::WakeSta);
   return true;
+}
+
+bool wifiConfigCmdIdle() {
+  return portalPending == PortalCmd::None && !portalBusy;
 }
 
 uint32_t wifiConfigDateColor() { return dateColor; }
@@ -746,7 +917,8 @@ bool wifiConfigIsConnected() { return false; }
 bool wifiConfigIsRadioOn() { return false; }
 IPAddress wifiConfigLocalIp() { return IPAddress(); }
 void wifiConfigRadioOff() {}
-bool wifiConfigWakeStaForSync() { return false; }
+bool wifiConfigRequestWake() { return false; }
+bool wifiConfigCmdIdle() { return true; }
 uint32_t wifiConfigDateColor() { return 0xEFFA5C; }
 uint32_t wifiConfigClockColor() { return 0x00F0FF; }
 bool wifiConfigTakeColorsChanged() { return false; }
