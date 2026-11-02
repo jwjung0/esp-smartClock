@@ -17,6 +17,9 @@ static volatile bool updatedFlag = false;
 static float cachedTempC = NAN;
 static float cachedHumidityPct = NAN;
 static char cachedMain[16] = "";
+static bool hasSunTimes = false;
+static time_t cachedSunrise = 0;
+static time_t cachedSunset = 0;
 
 void weatherFetchBegin(void) {
   hasData = false;
@@ -24,6 +27,9 @@ void weatherFetchBegin(void) {
   cachedTempC = NAN;
   cachedHumidityPct = NAN;
   cachedMain[0] = '\0';
+  hasSunTimes = false;
+  cachedSunrise = 0;
+  cachedSunset = 0;
 #if defined(FIRMWARE_MODE_CHECKUP)
   Serial.println("weather fetch: OpenWeather 2.5 /weather (checkup)");
 #else
@@ -52,6 +58,16 @@ bool weatherFetchGet(float *tempC, float *humidityPct, char *mainOut,
     strncpy(mainOut, cachedMain, mainOutLen - 1);
     mainOut[mainOutLen - 1] = '\0';
   }
+  return true;
+}
+
+bool weatherFetchGetSunTimes(time_t *sunrise, time_t *sunset) {
+  if (!hasSunTimes)
+    return false;
+  if (sunrise)
+    *sunrise = cachedSunrise;
+  if (sunset)
+    *sunset = cachedSunset;
   return true;
 }
 
@@ -128,11 +144,33 @@ bool weatherFetchOnce(void) {
   cachedHumidityPct = humidity;
   strncpy(cachedMain, mainStr, sizeof(cachedMain) - 1);
   cachedMain[sizeof(cachedMain) - 1] = '\0';
+
+  // sys.sunrise / sys.sunset are UTC unix timestamps for the query location.
+  JsonObject sysObj = doc["sys"].as<JsonObject>();
+  if (!sysObj.isNull() &&
+      (sysObj["sunrise"].is<long>() || sysObj["sunrise"].is<unsigned long>() ||
+       sysObj["sunrise"].is<int>()) &&
+      (sysObj["sunset"].is<long>() || sysObj["sunset"].is<unsigned long>() ||
+       sysObj["sunset"].is<int>())) {
+    const time_t sunrise = (time_t)sysObj["sunrise"].as<unsigned long>();
+    const time_t sunset = (time_t)sysObj["sunset"].as<unsigned long>();
+    if (sunrise > 0 && sunset > sunrise) {
+      cachedSunrise = sunrise;
+      cachedSunset = sunset;
+      hasSunTimes = true;
+    }
+  }
+
   hasData = true;
   updatedFlag = true;
 
-  Serial.printf("weather fetch ok  T=%.1f RH=%.0f main=%s\n", cachedTempC,
-                cachedHumidityPct, cachedMain);
+  if (hasSunTimes)
+    Serial.printf("weather fetch ok  T=%.1f RH=%.0f main=%s sunrise=%lu sunset=%lu\n",
+                  cachedTempC, cachedHumidityPct, cachedMain,
+                  (unsigned long)cachedSunrise, (unsigned long)cachedSunset);
+  else
+    Serial.printf("weather fetch ok  T=%.1f RH=%.0f main=%s\n", cachedTempC,
+                  cachedHumidityPct, cachedMain);
   return true;
 }
 
@@ -143,5 +181,6 @@ bool weatherFetchOnce(void) { return false; }
 bool weatherFetchHasData(void) { return false; }
 bool weatherFetchTakeUpdated(void) { return false; }
 bool weatherFetchGet(float *, float *, char *, size_t) { return false; }
+bool weatherFetchGetSunTimes(time_t *, time_t *) { return false; }
 
 #endif

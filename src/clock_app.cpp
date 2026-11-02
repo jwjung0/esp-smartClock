@@ -402,10 +402,17 @@ static void showLoading(const char *status) {
 }
 
 static bool isLocalNight() {
+  time_t sunrise = 0;
+  time_t sunset = 0;
+  if (weatherFetchGetSunTimes(&sunrise, &sunset)) {
+    const time_t now = time(nullptr);
+    if (now > 0)
+      return now < sunrise || now >= sunset;
+  }
+  // Fallback before first weather fetch (or missing sys.*).
   struct tm t;
   if (!timeSyncGet(&t))
     return false;
-  // Coarse day/night for Clear icon (local clock).
   return t.tm_hour < 6 || t.tm_hour >= 20;
 }
 
@@ -695,7 +702,7 @@ static void blinkColon(const struct tm &localTm) {
 
 static void paintTime(const struct tm &localTm) {
   static int lastYday = -1;
-  static int lastHour = -1;
+  static int lastNight = -1; // -1 unset, 0 day, 1 night
 
   setDigitPair(hhPair, localTm.tm_hour);
   setDigitPair(mmPair, localTm.tm_min);
@@ -714,11 +721,13 @@ static void paintTime(const struct tm &localTm) {
     }
     lastYday = localTm.tm_yday;
   }
-  if (localTm.tm_hour != lastHour) {
-    lastHour = localTm.tm_hour;
-    // Swap Clear day/night icon at 06:00 / 18:00 without waiting for weather
-    // fetch.
-    refreshWeatherIconFromCache();
+  {
+    // Swap Clear day/night icon at OpenWeather sunrise/sunset.
+    const int night = isLocalNight() ? 1 : 0;
+    if (night != lastNight) {
+      lastNight = night;
+      refreshWeatherIconFromCache();
+    }
   }
   blinkColon(localTm);
 }

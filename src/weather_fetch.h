@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stddef.h>
+#include <time.h>
 
 #if defined(__cplusplus)
 extern "C" {
@@ -17,6 +18,9 @@ bool weatherFetchTakeUpdated(void); // true once per successful fetch
 
 bool weatherFetchGet(float *tempC, float *humidityPct, char *mainOut,
                      size_t mainOutLen);
+
+// UTC unix sunrise/sunset from OpenWeather sys (last successful fetch).
+bool weatherFetchGetSunTimes(time_t *sunrise, time_t *sunset);
 
 #if defined(__cplusplus)
 }
