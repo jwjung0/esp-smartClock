@@ -20,7 +20,7 @@
 static const uint16_t kScreenW = 240;
 static const uint16_t kScreenH = 240;
 static const uint32_t kNtpWaitMs = 15000;
-static const uint32_t kBootConfigMs = 10UL * 60UL * 1000UL; // portal window
+static const uint32_t kBootConfigMs = 5UL * 60UL * 1000UL; // portal window
 static const uint32_t kDailySyncMs = 24UL * 60UL * 60UL * 1000UL;
 static const uint32_t kClimateUiMs =
     5000; // refresh ui_temp / ui_humid from BMx280
@@ -786,7 +786,7 @@ static void closeBootConfigWindow() {
   bootConfigOpen = false;
   wifiConfigRadioOff();
   updateWifiIcon();
-  Serial.println("Boot config window closed (10 min)");
+  Serial.println("Boot config window closed (5 min)");
 }
 
 enum class NtpPhase : uint8_t { Idle, Waking, Waiting };
@@ -917,7 +917,7 @@ void clockAppSetup() {
   bootConfigUntilMs = millis() + kBootConfigMs;
   nextNtpSyncMs = millis() + kDailySyncMs;
   if (bootConfigOpen)
-    Serial.println("Boot config window: 10 min (then WiFi off)");
+    Serial.println("Boot config window: 5 min (then WiFi off)");
 
   bmeSensorBegin();
   weatherFetchBegin();
