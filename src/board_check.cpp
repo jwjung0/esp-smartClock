@@ -129,7 +129,7 @@ static void lcdShowWeather(bool ok, float tC, float rh, const char *main) {
     tft.print("see Serial");
     return;
   }
-  tft.print("OpenWeather");
+  tft.print("Weather");
   tft.setCursor(8, 80);
   tft.printf("T %.1f C", tC);
   tft.setCursor(8, 110);
@@ -144,11 +144,11 @@ static void lcdShowWeather(bool ok, float tC, float rh, const char *main) {
 
 static void openWeatherCheckOnce() {
   Serial.println();
-  Serial.println("OpenWeather probe (2.5 /weather)…");
+  Serial.println("Weather probe (Naver KMA + OpenWeather)…");
   weatherFetchBegin();
   if (!wifiConnectFromNvs(20000)) {
     lcdShowWeather(false, 0, 0, nullptr);
-    Serial.println("OpenWeather test FAIL — WiFi");
+    Serial.println("Weather test FAIL — WiFi");
     return;
   }
   const bool ok = weatherFetchOnce();
@@ -158,12 +158,12 @@ static void openWeatherCheckOnce() {
     weatherFetchGet(&t, &h, mainBuf, sizeof(mainBuf));
   lcdShowWeather(ok, t, h, mainBuf);
   if (ok)
-    Serial.println("OpenWeather test OK — see LCD + Serial line above");
+    Serial.println("Weather test OK — see LCD + Serial line above");
   else
-    Serial.println("OpenWeather test FAIL — check weather_config.h / API key");
+    Serial.println("Weather test FAIL — check weather_config.h");
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
-  Serial.println("OpenWeather: WiFi off");
+  Serial.println("Weather: WiFi off");
   Serial.println();
 }
 

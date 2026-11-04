@@ -65,18 +65,22 @@ On **s2mini**, share the climate I2C bus. On **esp32dev**, use a second bus (`Wi
 - Clock UI on the 1.54" LCD (SquareLine / LVGL)
 - Wi‑Fi provisioning via local HTTP portal (SoftAP + STA)
 - NTP time sync in **KST (UTC+9)** → live `ui_time` / `ui_date`
-- Power policy: **10 min** config window after boot, then Wi‑Fi off; **daily** NTP resync; **every 10 min** climate data ingest (brief Wi‑Fi wake → POST → OpenWeather GET → Naver market GET → off). With radio off: CPU **80 MHz**, home loop idles until the next **1 Hz** colon/time tick (light sleep when auto-BL is off; timed wait when auto-BL PWM must stay running). Radio on → CPU **240 MHz**. Indoor auto-BL curve caps ~**70%** duty.
+- Power policy: **10 min** config window after boot, then Wi‑Fi off; **daily** NTP resync; **every 10 min** climate data ingest (brief Wi‑Fi wake → POST → Naver weather + OpenWeather GET → Naver market GET → off). With radio off: CPU **80 MHz**, home loop idles until the next **1 Hz** colon/time tick (light sleep when auto-BL is off; timed wait when auto-BL PWM must stay running). Radio on → CPU **240 MHz**. Indoor auto-BL curve caps ~**70%** duty.
 - Climate ingest deploy targets: **local** (this Mac) vs **prod** (Ubuntu) via gitignored `include/ingest_config_*.h`
 - Live indoor T/RH from BME280 on `ui_temp*` / `ui_humid`
-- Ambient lux from VEML7700 → auto LCD backlight brightness (PWM; no ingest). Indoor log curve (~10% night floor, ~70% day cap). Config portal **Backlight** switch turns auto on/off (off = full brightness; stored in NVS `clockui` / `bl_auto`)
-- Outdoor weather via **OpenWeather Current Weather API 2.5** → `ui_current_temp`, `ui_current_humid`, image `ui_weather` (free-tier key; One Call 3.0/4.0 need a paid plan)
+- Ambient lux from VEML7700 → auto LCD backlight brightness (PWM; no ingest). Indoor log curve (~10% night floor, ~70% day cap). Config portal **Backlight** switch turns auto on/off (off = full brightness; stored in NVS `clockui` / `bl_auto`). **Weather** source stored in NVS `clockui` / `wx_src` (`naver` | `openweather`)
+- Outdoor weather → `ui_current_temp`, `ui_current_humid`, image `ui_weather`: config portal **Weather** source (default **Naver**; optional **OpenWeather**). The other provider is used if the selected one fails. OpenWeather needs a free-tier 2.5 key (One Call 3.0/4.0 need a paid plan)
 - Market ticker → scrolling Label `ui_market`: defaults **KS** / **KQ** / **Nasdaq** / **USD**, plus optional custom tickers from the config portal. **KS/KQ/USD** (+ custom) from **Naver Finance**; **Nasdaq** from **Yahoo** (`^IXIC`). Up = red, down = blue, flat = white
 
 **SquareLine outdoor weather**
 
 - Widgets: Image `ui_weather`, Labels `ui_current_temp` / `ui_current_humid` (+ `ui_current_celcus` / `ui_current_pct`)
-- Assets: `weather_clear`, `weather-clouds`, `weather-rain`, `weather-thunder`, `weather-snow`, `weather-atmosphere`. Firmware maps `weather[0].main` (`Rain`/`Drizzle` → rain, mist/fog/… → atmosphere, `Tornado` → thunder)
-- Create gitignored `include/weather_config.h` with `OPENWEATHER_API_KEY` and lat/lon (default Seoul-ish `37.49056` / `127.02`)
+- Assets: `weather_clear`, `weather-clouds`, `icon_cloudy_sun` / `icon_cloudy_night`, `weather-rain`, `weather-thunder`, `weather-snow`, `weather-atmosphere`
+- **Naver:** maps KMA `wetrCd` / `wetrTxt` (맑음 → clear; 구름많음 → sun|moon+clouds; 흐림 → clouds; 비/눈/낙뢰/안개… → matching asset)
+- **OpenWeather:** maps `weather[0].main` / `id` (`Rain`/`Drizzle` → rain, mist/fog/… → atmosphere, `Tornado` → thunder; Clouds `801`–`802` → sun|moon+clouds)
+- Create gitignored `include/weather_config.h` with:
+  - `OPENWEATHER_API_KEY` and lat/lon (default Seoul-ish `37.49056` / `127.02`)
+  - `NAVER_WEATHER_REGION_CODE` (8-digit 읍·면·동). To get it: open your area on [weather.naver.com](https://weather.naver.com), then copy the code from the URL path — e.g. `https://weather.naver.com/today/09650107?...` → `09650107`
 
 **SquareLine market ticker**
 
@@ -90,7 +94,7 @@ On **s2mini**, share the climate I2C bus. On **esp32dev**, use a second bus (`Wi
 - LCD color cycle + BL blink
 - BME280 over I2C — Serial prints pin map, probe `OK`/`FAIL`, then `T` / `RH` / `P` each loop
 - VEML7700 over I2C — probe `OK`/`FAIL`, then `lux=…` + `BL duty=` each loop (PWM follows lux; shared bus on s2mini; GPIO32/33 on esp32dev)
-- OpenWeather once at boot — STA from NVS (same credentials as app portal) → HTTPS `2.5/weather` → Serial + LCD (`T` / `RH` / `main`), then Wi‑Fi off. Needs `include/weather_config.h` and a prior app Wi‑Fi provision
+- Weather once at boot — STA from NVS (same credentials as app portal) → Naver KMA + OpenWeather HTTPS → Serial + LCD (`T` / `RH` / `main`), then Wi‑Fi off. Needs `include/weather_config.h` and a prior app Wi‑Fi provision
 
 ## Wi‑Fi + NTP setup
 
@@ -102,8 +106,8 @@ On **s2mini**, share the climate I2C bus. On **esp32dev**, use a second bus (`Wi
 6. SoftAP setup stays **http://192.168.4.1/**.
 7. Portal stays up for **10 minutes after boot**, then Wi‑Fi turns off. Power-cycle for another config window.
 8. NTP resyncs about **once per day** (brief Wi‑Fi wake, then off again). Time zone: **KST**.
-9. After the config window, climate readings POST about **every 10 minutes** (Wi‑Fi on → POST → OpenWeather GET → Naver market GET → off). Set URL/token in gitignored `include/ingest_config_local.h` / `include/ingest_config_prod.h`.
-10. Same wake fetches outdoor weather (HTTPS, `units=metric`) and market quotes (Naver). Set the OpenWeather API key in gitignored `include/weather_config.h`.
+9. After the config window, climate readings POST about **every 10 minutes** (Wi‑Fi on → POST → Naver weather + OpenWeather GET → Naver market GET → off). Set URL/token in gitignored `include/ingest_config_local.h` / `include/ingest_config_prod.h`.
+10. Same wake fetches outdoor weather (Naver KMA preferred, OpenWeather fallback) and market quotes (Naver). Set keys/region in gitignored `include/weather_config.h`.
 
 Credentials are stored in NVS (`Preferences` namespace `wifi`). UI colors + backlight auto use `clockui`; market defaults/customs use `market`.
 
@@ -158,12 +162,12 @@ First `pio run` downloads the ESP32 platform and toolchain automatically.
 platformio.ini              # envs: app_<board>_<local|prod>, checkup_<board>
 include/board_pins_*.h      # per-board LCD / BME280 / VEML7700 / LED pins
 include/ingest_config_*.h   # local vs prod URL/token (gitignored)
-include/weather_config.h    # OpenWeather API key + lat/lon (gitignored)
+include/weather_config.h    # OpenWeather key/lat/lon + Naver region code (gitignored)
 src/main.cpp                # setup/loop — switches on FIRMWARE_MODE_*
 src/board_check.h/.cpp      # LED + serial smoke test
 src/clock_app.h/.cpp        # LVGL clock app
 src/data_ingest.h/.cpp      # BME280 → HTTP climate ingest (10 min wake)
-src/weather_fetch.h/.cpp    # OpenWeather 2.5 /weather (HTTPS)
+src/weather_fetch.h/.cpp    # Naver KMA + OpenWeather 2.5 (HTTPS; Naver preferred)
 src/market_fetch.h/.cpp     # Naver Finance KS/KQ/Nasdaq/USD ticker (HTTPS)
 src/wifi_config.h/.cpp      # SoftAP/STA portal, NVS credentials
 src/time_sync.h/.cpp        # NTP (KST) + UI time/date formatters

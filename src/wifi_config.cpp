@@ -5,6 +5,7 @@
 #include "bl_ctrl.h"
 #include "market_fetch.h"
 #include "power_policy.h"
+#include "weather_fetch.h"
 
 #include <DNSServer.h>
 #include <ESPmDNS.h>
@@ -376,6 +377,7 @@ static void handleRoot() {
         F("{\"v\":1,\"d\":{\"KS\":1,\"KQ\":1,\"Nasdaq\":1,\"USD\":1},\"c\":[]}");
 
   const bool blAutoOn = blCtrlAutoEnabled();
+  const bool wxPreferNaver = weatherConfigPreferNaver();
 
   html += F("<section class=box>"
             "<div class=box-head>"
@@ -387,9 +389,28 @@ static void handleRoot() {
   html += F(">"
             "<span class=slider></span>"
             "</label></div>"
-            "<p class=hint>On: brightness follows ambient light (VEML7700). "
+            "<p class=hint>On: brightness follows ambient light. "
             "Off: full brightness.</p>"
             "<p class=msg id=bl_msg style=\"display:none\"></p>"
+            "</section>");
+
+  html += F("<section class=box>"
+            "<div class=box-head>"
+            "<h1>Weather</h1>"
+            "</div>"
+            "<p class=hint>Outdoor temp / humidity / icon source. "
+            "The other provider is used if the selected one fails.</p>"
+            "<div class=chk>"
+            "<label><input type=radio name=wx_src id=wx_naver value=naver");
+  if (wxPreferNaver)
+    html += F(" checked");
+  html += F("> Naver</label></div>"
+            "<div class=chk>"
+            "<label><input type=radio name=wx_src id=wx_ow value=openweather");
+  if (!wxPreferNaver)
+    html += F(" checked");
+  html += F("> OpenWeather</label></div>"
+            "<p class=msg id=wx_msg style=\"display:none\"></p>"
             "</section>");
 
   html += F("<section class=box>"
@@ -596,6 +617,20 @@ static void handleRoot() {
             "if(j&&j.ok){blMsg(on?'Auto brightness On':'Auto brightness Off',true);}"
             "else{blMsg('Save failed',false);}})"
             ".catch(()=>blMsg('Save failed',false));});"
+            "function wxMsg(t,ok){"
+            "const m=document.getElementById('wx_msg');"
+            "m.style.display='block';m.style.color=ok?'#7d7':'#effa5c';m.textContent=t;}"
+            "function wxPost(src){"
+            "fetch('/weather',{method:'POST',headers:{'Content-Type':"
+            "'application/x-www-form-urlencoded'},body:'src='+encodeURIComponent(src)})"
+            ".then(r=>r.json()).then(j=>{"
+            "if(j&&j.ok){wxMsg(src==='naver'?'Naver':'OpenWeather',true);}"
+            "else{wxMsg('Save failed',false);}})"
+            ".catch(()=>wxMsg('Save failed',false));}"
+            "document.getElementById('wx_naver').addEventListener('change',()=>{"
+            "if(document.getElementById('wx_naver').checked)wxPost('naver');});"
+            "document.getElementById('wx_ow').addEventListener('change',()=>{"
+            "if(document.getElementById('wx_ow').checked)wxPost('openweather');});"
             "</script></body></html>");
 
   server.send(200, "text/html", html);
@@ -722,6 +757,17 @@ static void handleBacklight() {
   server.send(200, "application/json", "{\"ok\":true}");
 }
 
+static void handleWeather() {
+  const String src = server.arg("src");
+  if (!weatherConfigSetSource(src.c_str())) {
+    server.send(400, "application/json", "{\"ok\":false}");
+    return;
+  }
+  // Refresh on next/current wake so both sources stay warm for fallback.
+  marketFetchRequestRefresh();
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
 static void handleMarketGet() {
   String json;
   if (!marketConfigGetJson(json))
@@ -759,6 +805,7 @@ static void setupHttpRoutes() {
   server.on("/connect", HTTP_POST, handleConnect);
   server.on("/colors", HTTP_POST, handleColors);
   server.on("/backlight", HTTP_POST, handleBacklight);
+  server.on("/weather", HTTP_POST, handleWeather);
   server.on("/market", HTTP_GET, handleMarketGet);
   server.on("/market", HTTP_POST, handleMarketPost);
   // Captive portal probes

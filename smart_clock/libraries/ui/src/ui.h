@@ -46,6 +46,8 @@ LV_IMG_DECLARE( ui_img_575321948);   // assets/weather-clouds.png
 LV_IMG_DECLARE( ui_img_579096672);   // assets/weather-rain.png
 LV_IMG_DECLARE( ui_img_2047004501);   // assets/weather-snow.png
 LV_IMG_DECLARE( ui_img_1449682034);   // assets/weather-thunder.png
+LV_IMG_DECLARE( ui_img_icon_cloudy_night_png);   // assets/icon_cloudy_night.png
+LV_IMG_DECLARE( ui_img_icon_cloudy_sun_png);   // assets/icon_cloudy_sun.png
 
 // FONTS
 LV_FONT_DECLARE( ui_font_orbitron_20);

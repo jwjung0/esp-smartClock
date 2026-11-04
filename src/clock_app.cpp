@@ -420,18 +420,33 @@ static bool isLocalNight() {
   return t.tm_hour < 6 || t.tm_hour >= 20;
 }
 
-// OpenWeather weather[0].main → SquareLine weather assets on ui_weather.
+// Preferred weather main/id → SquareLine assets on ui_weather.
+// Naver: id is wetrCd (5/6 구름많음 → sun|moon+clouds; 7 흐림 → clouds).
+// OpenWeather: Clouds 801–802 → sun|moon+clouds; 803–804 → clouds.
 static void setWeatherIcon(const char *main) {
   if (!ui_weather)
     return;
+  const bool night = isLocalNight();
+  const bool fromNaver = weatherFetchIsNaver();
+  int weatherId = 0;
+  weatherFetchGetId(&weatherId);
+
   const lv_img_dsc_t *src = &ui_img_575321948; // weather-clouds
   if (main && main[0]) {
     if (strcmp(main, "Clear") == 0)
-      src = isLocalNight() ? &ui_img_1018541966 // weather-clear-night
-                           : &ui_img_weather_clear_png;
-    else if (strcmp(main, "Clouds") == 0)
-      src = &ui_img_575321948;
-    else if (strcmp(main, "Rain") == 0 || strcmp(main, "Drizzle") == 0)
+      src = night ? &ui_img_1018541966 // weather-clear-night
+                  : &ui_img_weather_clear_png;
+    else if (strcmp(main, "Clouds") == 0) {
+      const bool partly =
+          fromNaver ? (weatherId == 2 || weatherId == 3 || weatherId == 5 ||
+                       weatherId == 6)
+                    : (weatherId == 801 || weatherId == 802);
+      if (partly)
+        src = night ? &ui_img_icon_cloudy_night_png
+                    : &ui_img_icon_cloudy_sun_png;
+      else
+        src = &ui_img_575321948; // overcast / broken / unknown
+    } else if (strcmp(main, "Rain") == 0 || strcmp(main, "Drizzle") == 0)
       src = &ui_img_579096672; // weather-rain
     else if (strcmp(main, "Thunderstorm") == 0)
       src = &ui_img_1449682034; // weather-thunder
@@ -735,7 +750,7 @@ static void paintTime(const struct tm &localTm) {
     lastYday = localTm.tm_yday;
   }
   {
-    // Swap Clear day/night icon at OpenWeather sunrise/sunset.
+    // Swap Clear / partly-cloudy day|night icon at sunrise/sunset.
     const int night = isLocalNight() ? 1 : 0;
     if (night != lastNight) {
       lastNight = night;
