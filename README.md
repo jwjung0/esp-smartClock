@@ -4,11 +4,12 @@ ESP32 digital clock with on-device temperature and humidity. Firmware is built a
 
 ## Hardware
 
-| Part                       | Role                        |
-| -------------------------- | --------------------------- |
-| MCU (pick one at build)    | Wi‑Fi; see boards below     |
-| 1.54" LCD (240×240 ST7789) | Time and sensor display     |
-| BME280, or BMP280 + AHT20  | Climate (T / RH / P)        |
+| Part                       | Role                            |
+| -------------------------- | ------------------------------- |
+| MCU (pick one at build)    | Wi‑Fi; see boards below         |
+| 1.54" LCD (240×240 ST7789) | Time and sensor display         |
+| BME280, or BMP280 + AHT20  | Climate (T / RH / P)            |
+| VEML7700                   | Ambient lux → LCD backlight PWM |
 
 Supported boards (pin maps in `include/board_pins_*.h`):
 
@@ -43,6 +44,17 @@ LCD panel **SDA/SCL are SPI** (MOSI/SCLK), not the BME280 I2C pins. VCC must be 
 
 Six-pin modules also have **CSB** / **SDO** (sometimes silk **CSR** / **SDK**). Leave them at **board default** (usually unconnected). Do not wire those two to ESP GPIOs.
 
+**Ambient light (I2C)** — **VEML7700** (`0x10`) drives LCD backlight brightness (PWM on `PIN_TFT_BL`). Not uploaded to climate ingest.
+
+| VEML7700 | `s2mini` GPIO    | `esp32dev` GPIO    |
+| -------- | ---------------- | ------------------ |
+| VCC      | 3V3              | 3V3                |
+| GND      | GND              | GND                |
+| SDA      | 33 (D2) — shared | **32** (dedicated) |
+| SCL      | 35 (D1) — shared | **33** (dedicated) |
+
+On **s2mini**, share the climate I2C bus. On **esp32dev**, use a second bus (`Wire1`) so climate stays on 21/19.
+
 ## Features
 
 **Now**
@@ -56,6 +68,7 @@ Six-pin modules also have **CSB** / **SDO** (sometimes silk **CSR** / **SDK**). 
 - Power policy: **10 min** config window after boot, then Wi‑Fi off; **daily** NTP resync; **every 10 min** climate data ingest (brief Wi‑Fi wake → POST → OpenWeather GET → Naver market GET → off)
 - Climate ingest deploy targets: **local** (this Mac) vs **prod** (Ubuntu) via gitignored `include/ingest_config_*.h`
 - Live indoor T/RH from BME280 on `ui_temp*` / `ui_humid`
+- Ambient lux from VEML7700 → auto LCD backlight brightness (PWM; no ingest). Config portal **Backlight** switch turns auto on/off (off = full brightness; stored in NVS `clockui` / `bl_auto`)
 - Outdoor weather via **OpenWeather Current Weather API 2.5** → `ui_current_temp`, `ui_current_humid`, image `ui_weather` (free-tier key; One Call 3.0/4.0 need a paid plan)
 - Market ticker → scrolling Label `ui_market`: defaults **KS** / **KQ** / **Nasdaq** / **USD**, plus optional custom tickers from the config portal. **KS/KQ/USD** (+ custom) from **Naver Finance**; **Nasdaq** from **Yahoo** (`^IXIC`). Up = red, down = blue, flat = white
 
@@ -76,6 +89,7 @@ Six-pin modules also have **CSB** / **SDO** (sometimes silk **CSR** / **SDK**). 
 
 - LCD color cycle + BL blink
 - BME280 over I2C — Serial prints pin map, probe `OK`/`FAIL`, then `T` / `RH` / `P` each loop
+- VEML7700 over I2C — probe `OK`/`FAIL`, then `lux=…` + `BL duty=` each loop (PWM follows lux; shared bus on s2mini; GPIO32/33 on esp32dev)
 - OpenWeather once at boot — STA from NVS (same credentials as app portal) → HTTPS `2.5/weather` → Serial + LCD (`T` / `RH` / `main`), then Wi‑Fi off. Needs `include/weather_config.h` and a prior app Wi‑Fi provision
 
 ## Wi‑Fi + NTP setup
@@ -91,7 +105,7 @@ Six-pin modules also have **CSB** / **SDO** (sometimes silk **CSR** / **SDK**). 
 9. After the config window, climate readings POST about **every 10 minutes** (Wi‑Fi on → POST → OpenWeather GET → Naver market GET → off). Set URL/token in gitignored `include/ingest_config_local.h` / `include/ingest_config_prod.h`.
 10. Same wake fetches outdoor weather (HTTPS, `units=metric`) and market quotes (Naver). Set the OpenWeather API key in gitignored `include/weather_config.h`.
 
-Credentials are stored in NVS (`Preferences` namespace `wifi`). UI colors use `clockui`; market defaults/customs use `market`.
+Credentials are stored in NVS (`Preferences` namespace `wifi`). UI colors + backlight auto use `clockui`; market defaults/customs use `market`.
 
 ## Firmware envs
 
@@ -142,7 +156,7 @@ First `pio run` downloads the ESP32 platform and toolchain automatically.
 
 ```
 platformio.ini              # envs: app_<board>_<local|prod>, checkup_<board>
-include/board_pins_*.h      # per-board LCD / BME280 / LED pins
+include/board_pins_*.h      # per-board LCD / BME280 / VEML7700 / LED pins
 include/ingest_config_*.h   # local vs prod URL/token (gitignored)
 include/weather_config.h    # OpenWeather API key + lat/lon (gitignored)
 src/main.cpp                # setup/loop — switches on FIRMWARE_MODE_*
@@ -154,6 +168,8 @@ src/market_fetch.h/.cpp     # Naver Finance KS/KQ/Nasdaq/USD ticker (HTTPS)
 src/wifi_config.h/.cpp      # SoftAP/STA portal, NVS credentials
 src/time_sync.h/.cpp        # NTP (KST) + UI time/date formatters
 src/bme_sensor.h/.cpp       # BME280 I2C read
+src/light_sensor.h/.cpp     # VEML7700 lux
+src/bl_ctrl.h/.cpp          # lux → LCD backlight PWM (app + checkup)
 scripts/build.sh            # ./scripts/build.sh [board] [local|prod]
 scripts/flash.sh            # ./scripts/flash.sh [board] [local|prod]
 scripts/checkup.sh          # ./scripts/checkup.sh [board]

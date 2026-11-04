@@ -2,8 +2,10 @@
 
 #if defined(FIRMWARE_MODE_CHECKUP)
 
+#include "bl_ctrl.h"
 #include "bme_sensor.h"
 #include "board_pins.h"
+#include "light_sensor.h"
 #include "weather_fetch.h"
 
 #include <Adafruit_GFX.h>
@@ -46,12 +48,37 @@ static void printBmePins() {
   Serial.println("  CSB/SDO: leave board default (usually unconnected)");
 }
 
+static void printVemlPins() {
+  Serial.println("VEML7700 expected wiring (I2C):");
+  Serial.printf("  VCC=3V3  GND=GND  SDA=%d  SCL=%d  addr=0x10\n", PIN_VEML_SDA,
+                PIN_VEML_SCL);
+#if defined(BOARD_ESP32DEV)
+  Serial.println("  esp32dev: dedicated bus (Wire1), not climate pins");
+#else
+  Serial.println("  s2mini: shared with climate bus");
+#endif
+}
+
 static void bmeCheckOnce() {
   if (!bmeSensorOk()) {
     Serial.println("BMx280 not ready — check VCC/GND/SDA/SCL only");
     return;
   }
   bmeSensorPrint();
+}
+
+static void lightCheckOnce() {
+  if (!lightSensorOk()) {
+    Serial.println("VEML7700 not ready — check VCC/GND/SDA/SCL");
+    return;
+  }
+  lightSensorPrint();
+  // After LCD/BL PWM is up, drive brightness from lux (same curve as app).
+  if (lcdReady) {
+    blCtrlUpdateFromLux();
+    Serial.printf("BL duty=%d/255  ema=%.0f  auto=%s\n", blCtrlDuty(),
+                  blCtrlLuxEma(), blCtrlAutoEnabled() ? "on" : "off");
+  }
 }
 
 // Use NVS credentials saved by the app SoftAP portal (namespace wifi).
@@ -141,17 +168,17 @@ static void openWeatherCheckOnce() {
 }
 
 static void blinkBacklight() {
-  Serial.println("BL blink test — backlight should pulse 6 times");
-  pinMode(PIN_TFT_BL, OUTPUT);
+  Serial.println("BL blink test — backlight should pulse 6 times (PWM)");
+  blCtrlBegin();
   for (int i = 0; i < 6; i++) {
-    digitalWrite(PIN_TFT_BL, LOW);
+    blCtrlSetOn(false);
     Serial.printf("  BL OFF %d/6\n", i + 1);
     delay(350);
-    digitalWrite(PIN_TFT_BL, HIGH);
+    blCtrlSetOn(true);
     Serial.printf("  BL ON  %d/6\n", i + 1);
     delay(350);
   }
-  digitalWrite(PIN_TFT_BL, HIGH);
+  blCtrlSetOn(true);
   Serial.println(
       "If BL did not blink, move LCD BL wire to GPIO22 (D22), not 3V3");
 }
@@ -181,7 +208,7 @@ static bool lcdBegin() {
   tft.setSPISpeed(kSpiHz);
   tft.setRotation(1);
   tft.invertDisplay(true);
-  digitalWrite(PIN_TFT_BL, HIGH);
+  blCtrlSetOn(true);
   lcdShowColor(0);
   Serial.println("LCD init done — expect color names on glass every ~1.2s");
   return true;
@@ -194,7 +221,7 @@ void boardCheckSetup() {
   Serial.println();
   Serial.printf("smartClock board check OK (LED GPIO %d)\n", LED_PIN);
 
-  // Probe BME before LCD SPI so the I2C scan is clean.
+  // Probe I2C before LCD SPI so the bus scan is clean.
   Serial.println();
   printBmePins();
   Serial.println("BMx280 probe...");
@@ -206,9 +233,23 @@ void boardCheckSetup() {
   }
 
   Serial.println();
+  printVemlPins();
+  Serial.println("VEML7700 probe...");
+  if (lightSensorBegin()) {
+    Serial.println("VEML7700 test OK — expect lux every ~1.2s");
+    lightCheckOnce();
+  } else {
+    Serial.println("VEML7700 test FAIL — see wiring / I2C scan");
+  }
+
+  Serial.println();
   printLcdPins();
   blinkBacklight();
   lcdReady = lcdBegin();
+  // Lux already probed — drive BL from ambient for the rest of checkup.
+  blCtrlSetOn(true);
+  blCtrlUpdateFromLux();
+  Serial.printf("BL auto from lux  duty=%d/255\n", blCtrlDuty());
 
   // After LCD is up so pass/fail can paint on glass.
   openWeatherCheckOnce();
@@ -224,6 +265,7 @@ void boardCheckLoop() {
   colorIndex = (colorIndex + 1) % kColorCount;
   lcdShowColor(colorIndex);
   bmeCheckOnce();
+  lightCheckOnce();
   delay(STEP_MS);
 
   digitalWrite(LED_PIN, LOW);

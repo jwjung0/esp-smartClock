@@ -18,3 +18,7 @@
 #define PIN_BME_SDA 21  // D21
 #define PIN_BME_SCL 19  // D19
 #define BME280_I2C_ADDR 0x76
+
+// VEML7700 ambient light — dedicated I2C on Wire1 (not climate bus).
+#define PIN_VEML_SDA 32  // GPIO32
+#define PIN_VEML_SCL 33  // GPIO33

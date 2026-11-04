@@ -4,8 +4,11 @@
 
 #if defined(FIRMWARE_MODE_APP)
 
+#include "bl_ctrl.h"
 #include "bme_sensor.h"
+#include "board_pins.h"
 #include "data_ingest.h"
+#include "light_sensor.h"
 #include "market_fetch.h"
 #include "time_sync.h"
 #include "weather_fetch.h"
@@ -22,8 +25,8 @@ static const uint16_t kScreenH = 240;
 static const uint32_t kNtpWaitMs = 15000;
 static const uint32_t kBootConfigMs = 10UL * 60UL * 1000UL; // portal window
 static const uint32_t kDailySyncMs = 24UL * 60UL * 60UL * 1000UL;
-static const uint32_t kClimateUiMs =
-    5000; // refresh ui_temp / ui_humid from BMx280
+static const uint32_t kClimateUiMs = 5000; // refresh ui_temp / ui_humid
+static const uint32_t kLuxBlMs = 3000; // scan frequency for ambient sensor (VEML7700)
 static const uint32_t kProgressAnimMs = 500;
 static const uint32_t kCreepIntervalMs = 60;
 
@@ -35,14 +38,12 @@ static bool onHomeScreen = false;
 static uint32_t bootConfigUntilMs = 0;
 static uint32_t nextNtpSyncMs = 0;
 static uint32_t nextClimateUiMs = 0;
+static uint32_t nextLuxBlMs = 0;
 static bool bootConfigOpen = false;
 static int loadingCreepCeiling = 0;
 static uint32_t lastCreepMs = 0;
 
-static void setBacklight(bool on) {
-  pinMode(PIN_TFT_BL, OUTPUT);
-  digitalWrite(PIN_TFT_BL, on ? HIGH : LOW);
-}
+static void setBacklight(bool on) { blCtrlSetOn(on); }
 
 // Cast before | — LV_PART_* and LV_STATE_* are different enums (GCC warning).
 static const lv_style_selector_t kMain =
@@ -849,6 +850,7 @@ void clockAppSetup() {
 
   // Hold backlight off before anything else — TFT_eSPI used to force it on
   // during ST7789 init while GRAM was still white.
+  blCtrlLoadPrefs();
   setBacklight(false);
 
   Serial.begin(115200);
@@ -920,6 +922,10 @@ void clockAppSetup() {
     Serial.println("Boot config window: 10 min (then WiFi off)");
 
   bmeSensorBegin();
+  lightSensorBegin();
+  nextLuxBlMs = millis() + kLuxBlMs;
+  // Apply lux-based duty once sensor is up (BL already on from loading).
+  blCtrlUpdateFromLux();
   weatherFetchBegin();
   marketFetchBegin();
   // Startup only: stay on the loading screen until quotes are in hand.
@@ -962,6 +968,10 @@ void clockAppLoop() {
     if ((int32_t)(millis() - nextClimateUiMs) >= 0) {
       updateClimateUi();
       nextClimateUiMs = millis() + kClimateUiMs;
+    }
+    if ((int32_t)(millis() - nextLuxBlMs) >= 0) {
+      blCtrlUpdateFromLux();
+      nextLuxBlMs = millis() + kLuxBlMs;
     }
   }
 

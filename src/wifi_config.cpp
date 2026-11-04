@@ -2,6 +2,7 @@
 
 #if defined(FIRMWARE_MODE_APP)
 
+#include "bl_ctrl.h"
 #include "market_fetch.h"
 
 #include <DNSServer.h>
@@ -373,6 +374,23 @@ static void handleRoot() {
     marketJson =
         F("{\"v\":1,\"d\":{\"KS\":1,\"KQ\":1,\"Nasdaq\":1,\"USD\":1},\"c\":[]}");
 
+  const bool blAutoOn = blCtrlAutoEnabled();
+
+  html += F("<section class=box>"
+            "<div class=box-head>"
+            "<h1>Backlight</h1>"
+            "<label class=switch title=\"Auto brightness on/off\">"
+            "<input type=checkbox id=bl_auto");
+  if (blAutoOn)
+    html += F(" checked");
+  html += F(">"
+            "<span class=slider></span>"
+            "</label></div>"
+            "<p class=hint>On: brightness follows ambient light (VEML7700). "
+            "Off: full brightness.</p>"
+            "<p class=msg id=bl_msg style=\"display:none\"></p>"
+            "</section>");
+
   html += F("<section class=box>"
             "<div class=box-head>"
             "<h1>Stock Market</h1>"
@@ -566,6 +584,17 @@ static void handleRoot() {
             "if(document.getElementById('mkt_save').disabled)return;"
             "mktPost('Saved');});"
             "mktRender();"
+            "function blMsg(t,ok){"
+            "const m=document.getElementById('bl_msg');"
+            "m.style.display='block';m.style.color=ok?'#7d7':'#effa5c';m.textContent=t;}"
+            "document.getElementById('bl_auto').addEventListener('change',()=>{"
+            "const on=!!document.getElementById('bl_auto').checked;"
+            "fetch('/backlight',{method:'POST',headers:{'Content-Type':"
+            "'application/x-www-form-urlencoded'},body:'auto='+(on?'1':'0')})"
+            ".then(r=>r.json()).then(j=>{"
+            "if(j&&j.ok){blMsg(on?'Auto brightness On':'Auto brightness Off',true);}"
+            "else{blMsg('Save failed',false);}})"
+            ".catch(()=>blMsg('Save failed',false));});"
             "</script></body></html>");
 
   server.send(200, "text/html", html);
@@ -681,6 +710,17 @@ static void handleColors() {
   }
 }
 
+static void handleBacklight() {
+  const String autoArg = server.arg("auto");
+  if (!autoArg.length()) {
+    server.send(400, "application/json", "{\"ok\":false}");
+    return;
+  }
+  const bool on = autoArg != "0" && autoArg != "false" && autoArg != "off";
+  blCtrlSetAutoEnabled(on);
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
 static void handleMarketGet() {
   String json;
   if (!marketConfigGetJson(json))
@@ -717,6 +757,7 @@ static void setupHttpRoutes() {
   server.on("/scan", HTTP_GET, handleScan);
   server.on("/connect", HTTP_POST, handleConnect);
   server.on("/colors", HTTP_POST, handleColors);
+  server.on("/backlight", HTTP_POST, handleBacklight);
   server.on("/market", HTTP_GET, handleMarketGet);
   server.on("/market", HTTP_POST, handleMarketPost);
   // Captive portal probes

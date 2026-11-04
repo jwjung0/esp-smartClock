@@ -19,7 +19,11 @@
 #define PIN_TFT_RST  3   // A0
 #define PIN_TFT_BL   16  // D4
 
-// BME280 — I2C (board default Wire pins).
+// Climate + VEML7700 — shared I2C (board default Wire pins).
 #define PIN_BME_SDA 33  // D2
 #define PIN_BME_SCL 35  // D1
 #define BME280_I2C_ADDR 0x76
+
+// VEML7700 ambient light — same bus as climate (Wire).
+#define PIN_VEML_SDA PIN_BME_SDA
+#define PIN_VEML_SCL PIN_BME_SCL

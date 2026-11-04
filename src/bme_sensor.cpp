@@ -54,7 +54,9 @@ void bmeSensorScanBus(void) {
     }
     found++;
     Serial.printf("  device 0x%02X", a);
-    if (a == 0x38 || a == 0x39) {
+    if (a == 0x10) {
+      Serial.print("  (VEML7700 lux)");
+    } else if (a == 0x38 || a == 0x39) {
       Serial.print("  (AHT20 T+RH)");
     } else {
       const uint8_t id = readChipId(a);
