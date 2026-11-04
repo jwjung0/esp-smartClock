@@ -202,7 +202,7 @@ static bool lcdBegin() {
   SPI.begin(PIN_TFT_SCLK, -1 /* MISO */, PIN_TFT_MOSI, PIN_TFT_CS);
   tft.init(kScreenW, kScreenH);
   tft.setSPISpeed(kSpiHz);
-  tft.setRotation(1);
+  tft.setRotation(3); // 270° CW / 90° CCW
   tft.invertDisplay(true);
   blCtrlSetOn(true);
   lcdShowColor(0);

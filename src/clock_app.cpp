@@ -902,8 +902,8 @@ void clockAppSetup() {
   lv_init();
 
   tft.begin();
-  // 90° clockwise on 240x240 ST7789.
-  tft.setRotation(1);
+  // 270° clockwise (90° CCW) on 240x240 ST7789.
+  tft.setRotation(3);
   tft.fillScreen(TFT_BLACK);
   Serial.printf("TFT setup %s  MOSI=%d SCLK=%d CS=%d DC=%d RST=%d BL=%d\n",
                 USER_SETUP_INFO, PIN_TFT_MOSI, PIN_TFT_SCLK, PIN_TFT_CS,
