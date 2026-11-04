@@ -17,6 +17,15 @@ static bool isBmp280 = false;
 static bool isBme280 = false;
 static bool hasAht20 = false;
 static uint8_t addr = BME280_I2C_ADDR;
+static uint8_t ahtAddr = AHTX0_I2CADDR_DEFAULT;
+
+// Non-blocking poll: AHT trigger → wait ≥80 ms without delay() in loop.
+enum class PollPhase : uint8_t { Idle, AhtWait };
+static PollPhase pollPhase = PollPhase::Idle;
+static uint32_t ahtTriggerMs = 0;
+static float stageT = NAN;
+static float stageH = NAN;
+static float stageP = NAN;
 
 static uint8_t readChipId(uint8_t i2cAddr) {
   Wire.beginTransmission(i2cAddr);
@@ -34,12 +43,78 @@ static bool tryBeginAht20(void) {
   const uint8_t candidates[] = {0x38, 0x39};
   for (uint8_t i = 0; i < sizeof(candidates); i++) {
     if (aht.begin(&Wire, 0, candidates[i])) {
+      ahtAddr = candidates[i];
       Serial.printf("AHT20 OK   SDA=%d SCL=%d addr=0x%02X (humidity)\n",
-                    PIN_BME_SDA, PIN_BME_SCL, candidates[i]);
+                    PIN_BME_SDA, PIN_BME_SCL, ahtAddr);
       return true;
     }
   }
   return false;
+}
+
+static bool readBmxIntoStage(void) {
+  stageT = NAN;
+  stageH = NAN;
+  stageP = NAN;
+  if (isBmp280) {
+    stageT = bmp.readTemperature();
+    stageP = bmp.readPressure() / 100.0f;
+    return !isnan(stageT) && !isnan(stageP);
+  }
+  if (isBme280) {
+    stageT = bme.readTemperature();
+    stageH = bme.readHumidity();
+    stageP = bme.readPressure() / 100.0f;
+    return !isnan(stageT) && !isnan(stageH) && !isnan(stageP);
+  }
+  return true; // AHT-only
+}
+
+static bool ahtTrigger(void) {
+  Wire.beginTransmission(ahtAddr);
+  Wire.write(AHTX0_CMD_TRIGGER);
+  Wire.write(0x33);
+  Wire.write(0x00);
+  return Wire.endTransmission() == 0;
+}
+
+static bool ahtFetchIntoStage(void) {
+  uint8_t data[6];
+  if (Wire.requestFrom((int)ahtAddr, 6) != 6) {
+    return false;
+  }
+  for (int i = 0; i < 6; i++) {
+    data[i] = (uint8_t)Wire.read();
+  }
+  uint32_t h = data[1];
+  h <<= 8;
+  h |= data[2];
+  h <<= 4;
+  h |= data[3] >> 4;
+  stageH = ((float)h * 100.0f) / 0x100000;
+
+  uint32_t tdata = data[3] & 0x0F;
+  tdata <<= 8;
+  tdata |= data[4];
+  tdata <<= 8;
+  tdata |= data[5];
+  const float ahtT = ((float)tdata * 200.0f / 0x100000) - 50.0f;
+  if (isnan(stageT)) {
+    stageT = ahtT;
+  }
+  return !isnan(stageH) && !isnan(stageT);
+}
+
+static void copyStage(float *tempC, float *humidityPct, float *pressureHpa) {
+  if (tempC) {
+    *tempC = stageT;
+  }
+  if (humidityPct) {
+    *humidityPct = stageH;
+  }
+  if (pressureHpa) {
+    *pressureHpa = stageP;
+  }
 }
 
 void bmeSensorScanBus(void) {
@@ -193,6 +268,55 @@ bool bmeSensorRead(float *tempC, float *humidityPct, float *pressureHpa) {
   if (pressureHpa) {
     *pressureHpa = p; // NAN when AHT-only
   }
+  return true;
+}
+
+void bmeSensorRequest(void) {
+  if (!ready || pollPhase != PollPhase::Idle) {
+    return;
+  }
+  if (!readBmxIntoStage()) {
+    return;
+  }
+  if (!hasAht20) {
+    // No wait — Take will return the BMx sample immediately.
+    pollPhase = PollPhase::AhtWait;
+    ahtTriggerMs = 0;
+    return;
+  }
+  if (!ahtTrigger()) {
+    return;
+  }
+  ahtTriggerMs = millis();
+  pollPhase = PollPhase::AhtWait;
+}
+
+bool bmeSensorTake(float *tempC, float *humidityPct, float *pressureHpa) {
+  if (!ready || pollPhase != PollPhase::AhtWait) {
+    return false;
+  }
+
+  if (hasAht20) {
+    // Datasheet ~75–80 ms; skip status polls until then.
+    if ((uint32_t)(millis() - ahtTriggerMs) < 80) {
+      return false;
+    }
+    if (aht.getStatus() & AHTX0_STATUS_BUSY) {
+      return false;
+    }
+    if (!ahtFetchIntoStage()) {
+      pollPhase = PollPhase::Idle;
+      return false;
+    }
+  }
+
+  if (isnan(stageT) || (bmeSensorHasHumidity() && isnan(stageH))) {
+    pollPhase = PollPhase::Idle;
+    return false;
+  }
+
+  copyStage(tempC, humidityPct, pressureHpa);
+  pollPhase = PollPhase::Idle;
   return true;
 }
 

@@ -554,6 +554,11 @@ static void formatPriceWithCommas(float price, char *out, size_t outLen) {
     out[used < outLen ? used : outLen - 1] = '\0';
 }
 
+static bool marketBannerVisible(void) {
+  return onHomeScreen && marketConfigIsVisible() && ui_market &&
+         !lv_obj_has_flag(ui_market, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void applyMarketVisibility() {
   if (!ui_market)
     return;
@@ -654,9 +659,8 @@ static void paintLevelBars(lv_obj_t *low, lv_obj_t *norm, lv_obj_t *high,
   }
 }
 
-static void updateClimateUi() {
-  float t = 0, h = 0, p = 0;
-  if (!bmeSensorRead(&t, &h, &p)) {
+static void paintClimateUi(bool ok, float t, float h) {
+  if (!ok) {
     if (ui_temp)
       lv_label_set_text(ui_temp, "--.-");
     if (ui_humid)
@@ -690,6 +694,11 @@ static void updateClimateUi() {
   paintLevelBars(ui_humid_low, ui_humid_norm, ui_humid_high,
                  humidOk ? levelFromHumid(h) : ClimateLevel::Norm,
                  kHumidLowColor, kHumidNormColor, kHumidHighColor, humidOk);
+}
+
+static void updateClimateUi() {
+  float t = 0, h = 0, p = 0;
+  paintClimateUi(bmeSensorRead(&t, &h, &p), t, h);
 }
 
 static void blinkColon(const struct tm &localTm) {
@@ -741,7 +750,11 @@ static void homeUiPump() {
     struct tm localTm;
     if (timeSyncTick(&localTm)) {
       paintTime(localTm);
-      lv_refr_now(NULL);
+      // Full flush stalls SPI with the marquee strip; skip while banner is on.
+      if (!marketBannerVisible()) {
+        lv_timer_handler();
+        lv_refr_now(NULL);
+      }
     }
   }
   lvglPump();
@@ -801,9 +814,10 @@ static time_t ntpEpochBefore = 0;
 static bool ntpHadTime = false;
 
 static bool canIdleLightSleep(void) {
+  // Market circular scroll needs frequent LVGL pumps — never deep-idle then.
   return onHomeScreen && !bootConfigOpen && !wifiConfigIsRadioOn() &&
          wifiConfigCmdIdle() && !marketFetchBusy() &&
-         ntpPhase == NtpPhase::Idle;
+         ntpPhase == NtpPhase::Idle && !marketConfigIsVisible();
 }
 
 static void serviceDailyNtp() {
@@ -971,21 +985,38 @@ void clockAppLoop() {
   bool didTimeTick = false;
   bool uiDirty = false;
 
+  const bool radioOn = wifiConfigIsRadioOn();
+  const bool marketScroll = marketBannerVisible();
+  // 240 MHz only while Wi‑Fi is up; idle / market scroll run at 80 MHz.
+  powerSetRadioActive(radioOn);
+  powerSetUiBoost(false);
+  const bool needFastLvgl = bootConfigOpen || radioOn || marketScroll;
+
   // Keep UI alive first — WiFi/HTTP/I2C must not starve the clock.
   if (onHomeScreen) {
     struct tm localTm;
     if (timeSyncTick(&localTm)) {
       paintTime(localTm);
-      // Flush dirty areas now — otherwise colon/digits redraw across many
-      // partial refreshes and look like a slow fade over the whole second.
-      lv_refr_now(NULL);
       didTimeTick = true;
-      uiDirty = true;
+      // Never lv_refr_now while the market is scrolling — it force-flushes
+      // the whole dirty marquee and freezes banner + seconds together.
+      // With market off, a one-shot flush keeps digits from fading.
+      if (!marketScroll) {
+        lv_timer_handler();
+        lv_refr_now(NULL);
+      }
     }
+    // Climate every 5 s — AHT20 needs ~80 ms; Request/Take avoid delay().
     if ((int32_t)(millis() - nextClimateUiMs) >= 0) {
-      updateClimateUi();
+      bmeSensorRequest();
       nextClimateUiMs = millis() + kClimateUiMs;
-      uiDirty = true;
+    }
+    {
+      float t = 0, h = 0, p = 0;
+      if (bmeSensorTake(&t, &h, &p)) {
+        paintClimateUi(true, t, h);
+        uiDirty = true;
+      }
     }
     if ((int32_t)(millis() - nextLuxBlMs) >= 0) {
       blCtrlUpdateFromLux();
@@ -1004,10 +1035,6 @@ void clockAppLoop() {
     uiDirty = true;
   }
 
-  const bool radioOn = wifiConfigIsRadioOn();
-  // Fast LVGL pump only while portal/radio needs marquee/scroll; else once
-  // per second with the colon tick (power save when radio off).
-  const bool needFastLvgl = bootConfigOpen || radioOn;
   if (needFastLvgl || didTimeTick || uiDirty)
     lv_timer_handler();
 
@@ -1040,18 +1067,20 @@ void clockAppLoop() {
   if (canIdleLightSleep()) {
     if (!idleSleepActive) {
       idleSleepActive = true;
-      Serial.println("Power: idle (1 Hz colon, CPU 80 MHz)");
+      Serial.println("Power: idle (CPU 80 MHz, poll ≤100 ms)");
     }
-    // Wake for next second (colon) or sooner for climate/lux/NTP.
+    // Short slices so HH/MM/SS keep ticking; long delay(1s) looked frozen.
     uint64_t sleepUs = powerUsUntilNextSecond();
+    if (sleepUs > 100000ULL)
+      sleepUs = 100000ULL;
     const uint32_t now = millis();
     auto clampWakeMs = [&](uint32_t deadlineMs) {
       const int32_t left = (int32_t)(deadlineMs - now);
       if (left <= 0)
         return;
       uint64_t us = (uint64_t)left * 1000ULL;
-      if (us < 50000ULL)
-        us = 50000ULL;
+      if (us < 20000ULL)
+        us = 20000ULL;
       if (us < sleepUs)
         sleepUs = us;
     };
@@ -1059,8 +1088,6 @@ void clockAppLoop() {
     clampWakeMs(nextLuxBlMs);
     clampWakeMs(nextNtpSyncMs);
 
-    // LEDC PWM stops in light sleep. Auto-on keeps PWM via timed delay;
-    // auto-off (full BL) can light-sleep with the pin held high.
     if (!blCtrlAutoEnabled() && blCtrlWantOn()) {
       pinMode(PIN_TFT_BL, OUTPUT);
       digitalWrite(PIN_TFT_BL, HIGH);
@@ -1075,6 +1102,7 @@ void clockAppLoop() {
       idleSleepActive = false;
       Serial.println("Power: leave idle");
     }
+    // Market marquee / portal: ~5 ms LVGL cadence.
     delay(needFastLvgl ? 5 : 30);
   }
 }

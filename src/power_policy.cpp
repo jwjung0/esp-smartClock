@@ -4,20 +4,27 @@
 #include <sys/time.h>
 
 static bool radioActive = true;
-static bool scaledOnce = false;
+static bool uiBoost = false;
+static int appliedMhz = 0;
+
+static void applyCpu(void) {
+  const int mhz = (radioActive || uiBoost) ? 240 : 80;
+  if (mhz == appliedMhz)
+    return;
+  appliedMhz = mhz;
+  setCpuFrequencyMhz(mhz);
+  Serial.printf("Power: CPU %d MHz (radio=%s ui=%s)\n", mhz,
+                radioActive ? "on" : "off", uiBoost ? "boost" : "idle");
+}
 
 void powerSetRadioActive(bool radioOn) {
-  if (scaledOnce && radioActive == radioOn)
-    return;
   radioActive = radioOn;
-  scaledOnce = true;
-  if (radioOn) {
-    setCpuFrequencyMhz(240);
-    Serial.println("Power: CPU 240 MHz (radio on)");
-  } else {
-    setCpuFrequencyMhz(80);
-    Serial.println("Power: CPU 80 MHz (radio off)");
-  }
+  applyCpu();
+}
+
+void powerSetUiBoost(bool boost) {
+  uiBoost = boost;
+  applyCpu();
 }
 
 bool powerRadioActive(void) { return radioActive; }

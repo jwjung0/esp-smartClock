@@ -18,9 +18,14 @@ bool bmeSensorOk(void);
 // True for BME280 or when AHT20 is present (BMP280 alone has no humidity).
 bool bmeSensorHasHumidity(void);
 
-// Read latest sample. Returns false if sensor not ready or read failed.
+// Blocking read (checkup / boot). Prefer bmeSensorRequest + Take in the UI loop.
 // *humidityPct / *pressureHpa may be NAN when that sensor is absent.
 bool bmeSensorRead(float *tempC, float *humidityPct, float *pressureHpa);
+
+// Non-blocking sample for the UI loop. AHT20 needs ~80 ms; Request starts it,
+// Take returns true once when a full reading is ready (no delay() waits).
+void bmeSensorRequest(void);
+bool bmeSensorTake(float *tempC, float *humidityPct, float *pressureHpa);
 
 // One-line Serial printf of T / RH / P for the detected combo.
 void bmeSensorPrint(void);

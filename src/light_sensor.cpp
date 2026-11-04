@@ -71,7 +71,9 @@ bool lightSensorReadLux(float *lux) {
   if (!ready) {
     return false;
   }
-  const float v = veml.readLux(VEML_LUX_AUTO);
+  // NOWAIT: continuous ALS at fixed gain/IT from begin(). VEML_LUX_AUTO
+  // blocks the UI for 100–800+ ms per sample (freeze ~every kLuxBlMs).
+  const float v = veml.readLux(VEML_LUX_NORMAL_NOWAIT);
   if (isnan(v) || v < 0.0f) {
     return false;
   }
