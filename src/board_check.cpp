@@ -179,7 +179,7 @@ static bool lcdBegin() {
   SPI.begin(PIN_TFT_SCLK, -1 /* MISO */, PIN_TFT_MOSI, PIN_TFT_CS);
   tft.init(kScreenW, kScreenH);
   tft.setSPISpeed(kSpiHz);
-  tft.setRotation(0);
+  tft.setRotation(1);
   tft.invertDisplay(true);
   digitalWrite(PIN_TFT_BL, HIGH);
   lcdShowColor(0);

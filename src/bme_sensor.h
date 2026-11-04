@@ -7,23 +7,25 @@
 extern "C" {
 #endif
 
-// Init I2C on PIN_BME_SDA/SCL; auto-detects BME280 (0x60) or BMP280 (0x58).
+// Init I2C on PIN_BME_SDA/SCL.
+// Auto-detects BME280 (0x60), BMP280 (0x58), and/or AHT20 (0x38/0x39).
+// Common combo board: BMP280 (T+P) + AHT20 (RH).
 bool bmeSensorBegin(void);
 
 // True after a successful begin.
 bool bmeSensorOk(void);
 
-// True only for real BME280 (BMP280 has no humidity).
+// True for BME280 or when AHT20 is present (BMP280 alone has no humidity).
 bool bmeSensorHasHumidity(void);
 
 // Read latest sample. Returns false if sensor not ready or read failed.
-// On BMP280, *humidityPct is set to NAN when non-NULL.
+// *humidityPct / *pressureHpa may be NAN when that sensor is absent.
 bool bmeSensorRead(float *tempC, float *humidityPct, float *pressureHpa);
 
-// One-line Serial printf of T / RH / P (or T / P for BMP280).
+// One-line Serial printf of T / RH / P for the detected combo.
 void bmeSensorPrint(void);
 
-// Scan I2C bus and print responders + chip-id hints (checkup / debug).
+// Scan I2C bus and print responders + chip hints (checkup / debug).
 void bmeSensorScanBus(void);
 
 #ifdef __cplusplus

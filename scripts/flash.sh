@@ -2,7 +2,7 @@
 # Compile, then upload only if compile succeeds.
 # Usage (app, default): ./scripts/flash.sh [esp32dev|s2mini] [local|prod]
 # Usage (checkup):      ./scripts/flash.sh checkup [esp32dev|s2mini]
-# Default: esp32dev prod  →  app_esp32dev_prod
+# Default: esp32dev local  →  app_esp32dev_local
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -10,7 +10,7 @@ cd "$ROOT"
 usage() {
   echo "Usage: $0 [esp32dev|s2mini] [local|prod]" >&2
   echo "       $0 checkup [esp32dev|s2mini]" >&2
-  echo "Default: esp32dev prod (app). Do not pass 'app'." >&2
+  echo "Default: esp32dev local (app). Do not pass 'app'." >&2
 }
 
 if [[ "${1:-}" == "app" ]]; then
@@ -35,7 +35,7 @@ if [[ "${1:-}" == "checkup" ]]; then
 else
   MODE="app"
   BOARD="${1:-esp32dev}"
-  DEPLOY="${2:-prod}"
+  DEPLOY="${2:-local}"
   case "$BOARD" in
     esp32dev|s2mini) ;;
     *)

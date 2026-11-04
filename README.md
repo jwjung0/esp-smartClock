@@ -8,7 +8,7 @@ ESP32 digital clock with on-device temperature and humidity. Firmware is built a
 | -------------------------- | --------------------------- |
 | MCU (pick one at build)    | Wi‑Fi; see boards below     |
 | 1.54" LCD (240×240 ST7789) | Time and sensor display     |
-| BME280 or BMP280           | Climate (BMP280 = T+P only) |
+| BME280, or BMP280 + AHT20  | Climate (T / RH / P)        |
 
 Supported boards (pin maps in `include/board_pins_*.h`):
 
@@ -32,7 +32,7 @@ Supported boards (pin maps in `include/board_pins_*.h`):
 
 LCD panel **SDA/SCL are SPI** (MOSI/SCLK), not the BME280 I2C pins. VCC must be **3V3** (not 5V). If your module has no CS pin, leave ESP `D5` unused and set `PIN_TFT_CS` to `-1` in `include/board_pins_esp32dev.h`. On classic ESP32, do **not** use GPIO 25–27 for DC/RST — those are ADC2 and conflict with Wi‑Fi (display can freeze after HTTP).
 
-**BME280 / BMP280 (I2C)** — address `0x76` by default (`0x77` if needed). Many modules sold as “BME280” are actually **BMP280** (chip-id `0x58`: temperature + pressure, **no humidity**). Firmware auto-detects both.
+**Climate (I2C)** — auto-detects **BME280** (`0x60`), **BMP280** (`0x58`, T+P), and/or **AHT20** (`0x38`, T+RH). Common “temp+humid” modules are **BMP280 + AHT20** on the same bus; firmware uses BMP for T/P and AHT for RH.
 
 | BMx280 | `s2mini` GPIO | `esp32dev` GPIO |
 | ------ | ------------- | --------------- |
@@ -80,7 +80,7 @@ Six-pin modules also have **CSB** / **SDO** (sometimes silk **CSR** / **SDK**). 
 
 ## Wi‑Fi + NTP setup
 
-1. Flash app firmware (default): `./scripts/flash.sh` or `./scripts/flash.sh esp32dev prod`
+1. Flash app firmware (default): `./scripts/flash.sh` or `./scripts/flash.sh esp32dev local`
 2. On first boot (or if saved Wi‑Fi fails), the device opens SoftAP **`SmartClock`**.
 3. Join that AP on your phone, then open **http://192.168.4.1/** (captive portal usually redirects there).
 4. Pick a network from the scan list (or type SSID), enter the password, tap **Connect**.
