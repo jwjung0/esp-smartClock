@@ -11,11 +11,12 @@ static const int kBlPwmFreqHz = 5000;
 static const int kBlPwmBits = 8;
 static const int kBlPwmMax = (1 << kBlPwmBits) - 1; // 255
 
-// Lux→BL from measured VEML7700: dark ~20–50, room ~180–1100, sun ~6000.
-// Log map; snap EMA on big jumps so cover/uncover isn't stuck mid-duty.
-static const int kBlDutyMin = 38;        // ~15% floor (night)
+// Lux→BL for indoor room (day <1000, night <200): steeper log + hard cap.
+// Auto-off (portal) still forces full kBlPwmMax. Snap EMA on big jumps.
+static const int kBlDutyMin = 26;        // ~10% floor (night)
+static const int kBlDutyCap = 178;       // ~70% peak while auto-on
 static const float kLuxDark = 20.0f;     // at/below → min duty
-static const float kLuxBright = 3500.0f; // at/above → full
+static const float kLuxBright = 2000.0f; // at/above → cap
 static const float kLuxEmaAlpha = 0.55f;
 static const float kLuxSnapRatio = 2.5f; // |lux/ema| beyond this → snap
 
@@ -56,11 +57,11 @@ static int luxToDuty(float lux) {
   if (lux <= kLuxDark)
     return kBlDutyMin;
   if (lux >= kLuxBright)
-    return kBlPwmMax;
+    return kBlDutyCap;
   const float t =
       (log10f(lux) - log10f(kLuxDark)) / (log10f(kLuxBright) - log10f(kLuxDark));
   const float tc = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
-  return kBlDutyMin + (int)lroundf(tc * (float)(kBlPwmMax - kBlDutyMin));
+  return kBlDutyMin + (int)lroundf(tc * (float)(kBlDutyCap - kBlDutyMin));
 }
 
 static void applyBrightness(void) {
@@ -90,7 +91,7 @@ static void applyBrightness(void) {
     writeDuty(luxToDuty(luxEma));
   } else {
     luxRaw = NAN;
-    writeDuty(kBlPwmMax);
+    writeDuty(kBlDutyCap); // auto-on, no sensor → indoor peak, not full
   }
 }
 
@@ -156,4 +157,17 @@ void blCtrlSetAutoEnabled(bool enabled) {
   if (wantOn)
     applyBrightness();
   Serial.printf("BL auto brightness %s\n", autoEnabled ? "ON" : "OFF");
+}
+
+bool blCtrlWantOn(void) { return wantOn; }
+
+void blCtrlReapplyAfterSleep(void) {
+  // Light sleep gates the LEDC peripheral — re-attach and restore duty.
+  pwmReady = false;
+  blCtrlBegin();
+  if (!wantOn) {
+    writeDuty(0);
+    return;
+  }
+  writeDuty(dutyCurrent > 0 ? dutyCurrent : (autoEnabled ? kBlDutyCap : kBlPwmMax));
 }

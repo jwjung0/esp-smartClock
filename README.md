@@ -65,10 +65,10 @@ On **s2mini**, share the climate I2C bus. On **esp32dev**, use a second bus (`Wi
 - Clock UI on the 1.54" LCD (SquareLine / LVGL)
 - Wi‑Fi provisioning via local HTTP portal (SoftAP + STA)
 - NTP time sync in **KST (UTC+9)** → live `ui_time` / `ui_date`
-- Power policy: **10 min** config window after boot, then Wi‑Fi off; **daily** NTP resync; **every 10 min** climate data ingest (brief Wi‑Fi wake → POST → OpenWeather GET → Naver market GET → off)
+- Power policy: **10 min** config window after boot, then Wi‑Fi off; **daily** NTP resync; **every 10 min** climate data ingest (brief Wi‑Fi wake → POST → OpenWeather GET → Naver market GET → off). With radio off: CPU **80 MHz**, home loop idles until the next **1 Hz** colon/time tick (light sleep when auto-BL is off; timed wait when auto-BL PWM must stay running). Radio on → CPU **240 MHz**. Indoor auto-BL curve caps ~**70%** duty.
 - Climate ingest deploy targets: **local** (this Mac) vs **prod** (Ubuntu) via gitignored `include/ingest_config_*.h`
 - Live indoor T/RH from BME280 on `ui_temp*` / `ui_humid`
-- Ambient lux from VEML7700 → auto LCD backlight brightness (PWM; no ingest). Config portal **Backlight** switch turns auto on/off (off = full brightness; stored in NVS `clockui` / `bl_auto`)
+- Ambient lux from VEML7700 → auto LCD backlight brightness (PWM; no ingest). Indoor log curve (~10% night floor, ~70% day cap). Config portal **Backlight** switch turns auto on/off (off = full brightness; stored in NVS `clockui` / `bl_auto`)
 - Outdoor weather via **OpenWeather Current Weather API 2.5** → `ui_current_temp`, `ui_current_humid`, image `ui_weather` (free-tier key; One Call 3.0/4.0 need a paid plan)
 - Market ticker → scrolling Label `ui_market`: defaults **KS** / **KQ** / **Nasdaq** / **USD**, plus optional custom tickers from the config portal. **KS/KQ/USD** (+ custom) from **Naver Finance**; **Nasdaq** from **Yahoo** (`^IXIC`). Up = red, down = blue, flat = white
 
@@ -170,6 +170,7 @@ src/time_sync.h/.cpp        # NTP (KST) + UI time/date formatters
 src/bme_sensor.h/.cpp       # BME280 I2C read
 src/light_sensor.h/.cpp     # VEML7700 lux
 src/bl_ctrl.h/.cpp          # lux → LCD backlight PWM (app + checkup)
+src/power_policy.h/.cpp     # CPU 80/240 MHz with radio off/on
 scripts/build.sh            # ./scripts/build.sh [board] [local|prod]
 scripts/flash.sh            # ./scripts/flash.sh [board] [local|prod]
 scripts/checkup.sh          # ./scripts/checkup.sh [board]

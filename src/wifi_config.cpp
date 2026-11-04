@@ -4,6 +4,7 @@
 
 #include "bl_ctrl.h"
 #include "market_fetch.h"
+#include "power_policy.h"
 
 #include <DNSServer.h>
 #include <ESPmDNS.h>
@@ -791,10 +792,12 @@ static void applyRadioOff() {
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
   publishLinkFlags();
+  powerSetRadioActive(false);
   Serial.println("WiFi radio off (config/NTP idle)");
 }
 
 static bool applyWakeSta() {
+  powerSetRadioActive(true);
   String ssid, pass;
   loadCreds(ssid, pass);
   if (!ssid.length()) {

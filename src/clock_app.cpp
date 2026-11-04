@@ -10,6 +10,7 @@
 #include "data_ingest.h"
 #include "light_sensor.h"
 #include "market_fetch.h"
+#include "power_policy.h"
 #include "time_sync.h"
 #include "weather_fetch.h"
 #include "wifi_config.h"
@@ -17,6 +18,7 @@
 #include <lvgl.h>
 #include <TFT_eSPI.h>
 #include <ui.h>
+#include <esp_sleep.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -42,6 +44,7 @@ static uint32_t nextLuxBlMs = 0;
 static bool bootConfigOpen = false;
 static int loadingCreepCeiling = 0;
 static uint32_t lastCreepMs = 0;
+static bool idleSleepActive = false;
 
 static void setBacklight(bool on) { blCtrlSetOn(on); }
 
@@ -797,12 +800,20 @@ static uint32_t ntpWaitStartMs = 0;
 static time_t ntpEpochBefore = 0;
 static bool ntpHadTime = false;
 
+static bool canIdleLightSleep(void) {
+  return onHomeScreen && !bootConfigOpen && !wifiConfigIsRadioOn() &&
+         wifiConfigCmdIdle() && !marketFetchBusy() &&
+         ntpPhase == NtpPhase::Idle;
+}
+
 static void serviceDailyNtp() {
   if (ntpPhase == NtpPhase::Idle) {
     if ((int32_t)(millis() - nextNtpSyncMs) < 0)
       return;
     Serial.println("Daily NTP sync…");
+    powerSetRadioActive(true);
     if (!wifiConfigRequestWake()) {
+      powerSetRadioActive(false);
       nextNtpSyncMs = millis() + kDailySyncMs;
       return;
     }
@@ -952,10 +963,14 @@ void clockAppSetup() {
     loadingPump();
 
   showHome();
+  powerSetRadioActive(wifiConfigIsRadioOn());
   Serial.println("Home screen");
 }
 
 void clockAppLoop() {
+  bool didTimeTick = false;
+  bool uiDirty = false;
+
   // Keep UI alive first — WiFi/HTTP/I2C must not starve the clock.
   if (onHomeScreen) {
     struct tm localTm;
@@ -964,10 +979,13 @@ void clockAppLoop() {
       // Flush dirty areas now — otherwise colon/digits redraw across many
       // partial refreshes and look like a slow fade over the whole second.
       lv_refr_now(NULL);
+      didTimeTick = true;
+      uiDirty = true;
     }
     if ((int32_t)(millis() - nextClimateUiMs) >= 0) {
       updateClimateUi();
       nextClimateUiMs = millis() + kClimateUiMs;
+      uiDirty = true;
     }
     if ((int32_t)(millis() - nextLuxBlMs) >= 0) {
       blCtrlUpdateFromLux();
@@ -975,15 +993,23 @@ void clockAppLoop() {
     }
   }
 
-  if (wifiConfigTakeColorsChanged())
+  if (wifiConfigTakeColorsChanged()) {
     applyClockColors();
+    uiDirty = true;
+  }
   if (marketConfigTakeVisibilityChanged()) {
     applyMarketVisibility();
     if (marketConfigIsVisible())
       updateMarketUi();
+    uiDirty = true;
   }
 
-  lv_timer_handler();
+  const bool radioOn = wifiConfigIsRadioOn();
+  // Fast LVGL pump only while portal/radio needs marquee/scroll; else once
+  // per second with the colon tick (power save when radio off).
+  const bool needFastLvgl = bootConfigOpen || radioOn;
+  if (needFastLvgl || didTimeTick || uiDirty)
+    lv_timer_handler();
 
   // Portal DNS/HTTP runs on its own task — do not call wifiConfigLoop here.
   if (bootConfigOpen) {
@@ -1000,14 +1026,57 @@ void clockAppLoop() {
     wifiConfigRadioOff();
     updateWifiIcon();
   }
-  if (onHomeScreen && weatherFetchTakeUpdated())
+  if (onHomeScreen && weatherFetchTakeUpdated()) {
     updateOutdoorWeatherUi();
-  if (onHomeScreen && marketFetchTakeUpdated())
+    lv_timer_handler();
+  }
+  if (onHomeScreen && marketFetchTakeUpdated()) {
     updateMarketUi();
+    lv_timer_handler();
+  }
   if (onHomeScreen)
     updateWifiIcon();
 
-  delay(5);
+  if (canIdleLightSleep()) {
+    if (!idleSleepActive) {
+      idleSleepActive = true;
+      Serial.println("Power: idle (1 Hz colon, CPU 80 MHz)");
+    }
+    // Wake for next second (colon) or sooner for climate/lux/NTP.
+    uint64_t sleepUs = powerUsUntilNextSecond();
+    const uint32_t now = millis();
+    auto clampWakeMs = [&](uint32_t deadlineMs) {
+      const int32_t left = (int32_t)(deadlineMs - now);
+      if (left <= 0)
+        return;
+      uint64_t us = (uint64_t)left * 1000ULL;
+      if (us < 50000ULL)
+        us = 50000ULL;
+      if (us < sleepUs)
+        sleepUs = us;
+    };
+    clampWakeMs(nextClimateUiMs);
+    clampWakeMs(nextLuxBlMs);
+    clampWakeMs(nextNtpSyncMs);
+
+    // LEDC PWM stops in light sleep. Auto-on keeps PWM via timed delay;
+    // auto-off (full BL) can light-sleep with the pin held high.
+    if (!blCtrlAutoEnabled() && blCtrlWantOn()) {
+      pinMode(PIN_TFT_BL, OUTPUT);
+      digitalWrite(PIN_TFT_BL, HIGH);
+      esp_sleep_enable_timer_wakeup(sleepUs);
+      esp_light_sleep_start();
+      blCtrlReapplyAfterSleep();
+    } else {
+      delay((uint32_t)(sleepUs / 1000ULL));
+    }
+  } else {
+    if (idleSleepActive) {
+      idleSleepActive = false;
+      Serial.println("Power: leave idle");
+    }
+    delay(needFastLvgl ? 5 : 30);
+  }
 }
 
 #else

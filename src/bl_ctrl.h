@@ -29,6 +29,12 @@ float blCtrlLuxEma(void);
 bool blCtrlAutoEnabled(void);
 void blCtrlSetAutoEnabled(bool enabled);
 
+// True when backlight is requested on (PWM or full).
+bool blCtrlWantOn(void);
+
+// After CPU light sleep: re-attach LEDC and restore last duty.
+void blCtrlReapplyAfterSleep(void);
+
 #ifdef __cplusplus
 }
 #endif
