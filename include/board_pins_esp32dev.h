@@ -14,11 +14,11 @@
 #define PIN_TFT_RST  17  // GPIO17 / TX2
 #define PIN_TFT_BL   22  // D22
 
-// BME280 — I2C (avoid TFT; default Wire SCL is D22, used by BL).
+// Climate + VEML7700 — shared I2C (avoid TFT; default Wire SCL is D22, used by BL).
 #define PIN_BME_SDA 21  // D21
 #define PIN_BME_SCL 19  // D19
 #define BME280_I2C_ADDR 0x76
 
-// VEML7700 ambient light — dedicated I2C on Wire1 (not climate bus).
-#define PIN_VEML_SDA 32  // GPIO32
-#define PIN_VEML_SCL 33  // GPIO33
+// VEML7700 ambient light — same bus as climate (Wire).
+#define PIN_VEML_SDA PIN_BME_SDA
+#define PIN_VEML_SCL PIN_BME_SCL

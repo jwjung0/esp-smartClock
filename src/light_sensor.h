@@ -7,9 +7,7 @@
 extern "C" {
 #endif
 
-// Init VEML7700 on PIN_VEML_SDA/SCL.
-// s2mini: shared climate Wire (call after bmeSensorBegin).
-// esp32dev: dedicated Wire1 on GPIO32/33.
+// Init VEML7700 on shared climate Wire (call after bmeSensorBegin).
 bool lightSensorBegin(void);
 
 bool lightSensorOk(void);

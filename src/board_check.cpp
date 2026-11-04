@@ -52,11 +52,7 @@ static void printVemlPins() {
   Serial.println("VEML7700 expected wiring (I2C):");
   Serial.printf("  VCC=3V3  GND=GND  SDA=%d  SCL=%d  addr=0x10\n", PIN_VEML_SDA,
                 PIN_VEML_SCL);
-#if defined(BOARD_ESP32DEV)
-  Serial.println("  esp32dev: dedicated bus (Wire1), not climate pins");
-#else
-  Serial.println("  s2mini: shared with climate bus");
-#endif
+  Serial.println("  shared with climate I2C bus");
 }
 
 static void bmeCheckOnce() {

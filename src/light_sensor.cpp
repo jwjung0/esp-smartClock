@@ -9,47 +9,11 @@
 static Adafruit_VEML7700 veml;
 static bool ready = false;
 
-#if defined(BOARD_ESP32DEV)
-static TwoWire &lightWire = Wire1;
-static const bool kOwnBus = true;
-#else
-static TwoWire &lightWire = Wire;
-static const bool kOwnBus = false;
-#endif
-
-static void scanLightBus(void) {
-  Serial.printf("I2C scan (VEML)  SDA=%d SCL=%d @ 100 kHz\n", PIN_VEML_SDA,
-                PIN_VEML_SCL);
-  uint8_t found = 0;
-  for (uint8_t a = 1; a < 127; a++) {
-    lightWire.beginTransmission(a);
-    if (lightWire.endTransmission() != 0) {
-      continue;
-    }
-    found++;
-    Serial.printf("  device 0x%02X", a);
-    if (a == VEML7700_I2CADDR_DEFAULT) {
-      Serial.print("  (VEML7700 lux)");
-    }
-    Serial.println();
-  }
-  if (found == 0) {
-    Serial.println("  (no I2C devices on VEML bus)");
-  }
-}
-
 bool lightSensorBegin(void) {
   ready = false;
 
-  if (kOwnBus) {
-    lightWire.begin(PIN_VEML_SDA, PIN_VEML_SCL);
-    lightWire.setClock(100000);
-    lightWire.setTimeOut(50);
-    delay(20);
-    scanLightBus();
-  }
-
-  if (!veml.begin(&lightWire)) {
+  // Shared climate Wire — call after bmeSensorBegin() so the bus is up.
+  if (!veml.begin(&Wire)) {
     Serial.printf("VEML7700 FAIL  SDA=%d SCL=%d addr=0x%02X\n", PIN_VEML_SDA,
                   PIN_VEML_SCL, VEML7700_I2CADDR_DEFAULT);
     return false;
