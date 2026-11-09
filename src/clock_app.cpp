@@ -655,28 +655,30 @@ static void setArcAccent(lv_obj_t *arc, uint32_t hex) {
 
 // Temp arc accent: every 5°C from blue (cold) to red (hot).
 static uint32_t colorFromTempC(int tC) {
-  if (tC < 15)
-    return 0x1E6AFF;
+  if (tC < 16)
+    return 0x0b02f5;
   if (tC < 20)
-    return 0x00B7FF;
-  if (tC < 25)
+    return 0x024ff5;
+  if (tC < 24)
+    return 0x008cff;
+  if (tC < 28)
     return 0x00F0FF;
-  if (tC < 30)
+  if (tC < 32)
     return 0xF0D000;
-  if (tC < 35)
+  if (tC < 36)
     return 0xFF8A00;
   return 0xF8381E;
 }
 
 // Humid arc accent: every 20% from orange to blue.
 static uint32_t colorFromHumidPct(int pct) {
-  if (pct < 20)
+  if (pct < 21)
     return 0xFE9F00;
-  if (pct < 40)
+  if (pct < 41)
     return 0xF0C000;
-  if (pct < 60)
+  if (pct < 61)
     return 0x00F0FF;
-  if (pct < 80)
+  if (pct < 81)
     return 0x20A0E0;
   return 0x0490F9;
 }
