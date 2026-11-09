@@ -46,12 +46,12 @@ Six-pin modules also have **CSB** / **SDO** (sometimes silk **CSR** / **SDK**). 
 
 **Ambient light (I2C)** — **VEML7700** (`0x10`) drives LCD backlight brightness (PWM on `PIN_TFT_BL`). Not uploaded to climate ingest.
 
-| VEML7700 | `s2mini` GPIO         | `esp32dev` GPIO         |
-| -------- | --------------------- | ----------------------- |
-| VCC      | 3V3                   | 3V3                     |
-| GND      | GND                   | GND                     |
-| SDA      | 33 (D2) — shared      | 21 (D21) — shared       |
-| SCL      | 35 (D1) — shared      | 19 (D19) — shared       |
+| VEML7700 | `s2mini` GPIO    | `esp32dev` GPIO   |
+| -------- | ---------------- | ----------------- |
+| VCC      | 3V3              | 3V3               |
+| GND      | GND              | GND               |
+| SDA      | 33 (D2) — shared | 21 (D21) — shared |
+| SCL      | 35 (D1) — shared | 19 (D19) — shared |
 
 Share the climate I2C bus on both boards (VEML `0x10` does not collide with BMx/AHT).
 

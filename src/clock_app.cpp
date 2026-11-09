@@ -317,10 +317,12 @@ static void applyDarkTheme() {
   }
   if (ui_temp)
     lv_obj_set_style_text_color(ui_temp, white, kMain);
+  if (ui_temp_sub)
+    lv_obj_set_style_text_color(ui_temp_sub, white, kMain);
   if (ui_humid)
     lv_obj_set_style_text_color(ui_humid, white, kMain);
-  if (ui_celsus)
-    lv_obj_set_style_text_color(ui_celsus, white, kMain);
+  if (ui_celcus)
+    lv_obj_set_style_text_color(ui_celcus, white, kMain);
   if (ui_pct)
     lv_obj_set_style_text_color(ui_pct, white, kMain);
   if (ui_current_temp)
@@ -632,69 +634,97 @@ static void updateMarketUi() {
     lv_label_set_text(ui_market, line);
 }
 
-enum class ClimateLevel { Low, Norm, High };
+static const uint32_t kArcDim = 0x555555;
 
-static const uint32_t kBarDim = 0x222222;
-static const uint32_t kTempLowColor = 0x270CF1;
-static const uint32_t kTempNormColor = 0x07AAF6;
-static const uint32_t kTempHighColor = 0xF8381E;
-static const uint32_t kHumidLowColor = 0xFE9F00;
-static const uint32_t kHumidNormColor = 0x04FBA9;
-static const uint32_t kHumidHighColor = 0x0490F9;
-
-static ClimateLevel levelFromTemp(float t) {
-  if (t < 18.0f)
-    return ClimateLevel::Low;
-  if (t > 28.0f)
-    return ClimateLevel::High;
-  return ClimateLevel::Norm;
+static int clampi(int v, int lo, int hi) {
+  if (v < lo)
+    return lo;
+  if (v > hi)
+    return hi;
+  return v;
 }
 
-static ClimateLevel levelFromHumid(float h) {
-  if (h < 40.0f)
-    return ClimateLevel::Low;
-  if (h > 60.0f)
-    return ClimateLevel::High;
-  return ClimateLevel::Norm;
+static void setArcAccent(lv_obj_t *arc, uint32_t hex) {
+  if (!arc)
+    return;
+  const lv_color_t c = lv_color_hex(hex);
+  lv_obj_set_style_arc_color(arc, c, LV_PART_INDICATOR);
+  lv_obj_set_style_bg_color(arc, c, LV_PART_KNOB);
+  lv_obj_set_style_bg_opa(arc, LV_OPA_COVER, LV_PART_KNOB);
 }
 
-static void paintLevelBars(lv_obj_t *low, lv_obj_t *norm, lv_obj_t *high,
-                           ClimateLevel active, uint32_t cLow, uint32_t cNorm,
-                           uint32_t cHigh, bool hasValue) {
-  const uint32_t colors[3] = {
-      hasValue && active == ClimateLevel::Low ? cLow : kBarDim,
-      hasValue && active == ClimateLevel::Norm ? cNorm : kBarDim,
-      hasValue && active == ClimateLevel::High ? cHigh : kBarDim};
-  lv_obj_t *bars[3] = {low, norm, high};
-  for (int i = 0; i < 3; ++i) {
-    if (!bars[i])
-      continue;
-    lv_obj_set_style_bg_color(bars[i], lv_color_hex(colors[i]), kMain);
-    lv_obj_set_style_bg_opa(bars[i], LV_OPA_COVER, kMain);
-  }
+// Temp arc accent: every 5°C from blue (cold) to red (hot).
+static uint32_t colorFromTempC(int tC) {
+  if (tC < 15)
+    return 0x1E6AFF;
+  if (tC < 20)
+    return 0x00B7FF;
+  if (tC < 25)
+    return 0x00F0FF;
+  if (tC < 30)
+    return 0xF0D000;
+  if (tC < 35)
+    return 0xFF8A00;
+  return 0xF8381E;
+}
+
+// Humid arc accent: every 20% from orange to blue.
+static uint32_t colorFromHumidPct(int pct) {
+  if (pct < 20)
+    return 0xFE9F00;
+  if (pct < 40)
+    return 0xF0C000;
+  if (pct < 60)
+    return 0x00F0FF;
+  if (pct < 80)
+    return 0x20A0E0;
+  return 0x0490F9;
 }
 
 static void paintClimateUi(bool ok, float t, float h) {
+  if (ui_arc_humid)
+    lv_arc_set_range(ui_arc_humid, 0, 100);
+
   if (!ok) {
     if (ui_temp)
-      lv_label_set_text(ui_temp, "--.-");
+      lv_label_set_text(ui_temp, "--");
+    if (ui_temp_sub)
+      lv_label_set_text(ui_temp_sub, "");
     if (ui_humid)
       lv_label_set_text(ui_humid, "--");
-    paintLevelBars(ui_temp_low, ui_temp_norm, ui_temp_high, ClimateLevel::Norm,
-                   kTempLowColor, kTempNormColor, kTempHighColor, false);
-    paintLevelBars(ui_humid_low, ui_humid_norm, ui_humid_high,
-                   ClimateLevel::Norm, kHumidLowColor, kHumidNormColor,
-                   kHumidHighColor, false);
+    if (ui_arc_temp)
+      lv_arc_set_value(ui_arc_temp, 10);
+    if (ui_arc_humid)
+      lv_arc_set_value(ui_arc_humid, 0);
+    setArcAccent(ui_arc_temp, kArcDim);
+    setArcAccent(ui_arc_humid, kArcDim);
     return;
   }
 
-  if (ui_temp) {
-    char buf[16];
-    snprintf(buf, sizeof(buf), "%.1f", (double)t);
-    lv_label_set_text(ui_temp, buf);
+  // Labels show the raw reading; arcs use clamped integer fill.
+  char full[16];
+  snprintf(full, sizeof(full), "%.1f", (double)t);
+  char *dot = strchr(full, '.');
+  if (dot) {
+    *dot = '\0';
+    if (ui_temp)
+      lv_label_set_text(ui_temp, full);
+    if (ui_temp_sub) {
+      char sub[8];
+      snprintf(sub, sizeof(sub), ".%s", dot + 1);
+      lv_label_set_text(ui_temp_sub, sub);
+    }
+  } else {
+    if (ui_temp)
+      lv_label_set_text(ui_temp, full);
+    if (ui_temp_sub)
+      lv_label_set_text(ui_temp_sub, "");
   }
-  paintLevelBars(ui_temp_low, ui_temp_norm, ui_temp_high, levelFromTemp(t),
-                 kTempLowColor, kTempNormColor, kTempHighColor, true);
+
+  const int tArc = clampi((int)lroundf(t), 10, 40);
+  if (ui_arc_temp)
+    lv_arc_set_value(ui_arc_temp, tArc);
+  setArcAccent(ui_arc_temp, colorFromTempC(tArc));
 
   const bool humidOk = bmeSensorHasHumidity() && !isnan(h);
   if (ui_humid) {
@@ -706,9 +736,17 @@ static void paintClimateUi(bool ok, float t, float h) {
       lv_label_set_text(ui_humid, humBuf);
     }
   }
-  paintLevelBars(ui_humid_low, ui_humid_norm, ui_humid_high,
-                 humidOk ? levelFromHumid(h) : ClimateLevel::Norm,
-                 kHumidLowColor, kHumidNormColor, kHumidHighColor, humidOk);
+
+  if (!humidOk) {
+    if (ui_arc_humid)
+      lv_arc_set_value(ui_arc_humid, 0);
+    setArcAccent(ui_arc_humid, kArcDim);
+  } else {
+    const int hArc = clampi((int)lroundf(h), 0, 100);
+    if (ui_arc_humid)
+      lv_arc_set_value(ui_arc_humid, hArc);
+    setArcAccent(ui_arc_humid, colorFromHumidPct(hArc));
+  }
 }
 
 static void updateClimateUi() {

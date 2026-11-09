@@ -16,8 +16,6 @@ extern void ui_home_screen_destroy(void);
 extern lv_obj_t *ui_home;
 extern lv_obj_t *ui_temp;
 extern lv_obj_t *ui_humid;
-extern lv_obj_t *ui_celsus;
-extern lv_obj_t *ui_pct;
 extern lv_obj_t *ui_hh1;
 extern lv_obj_t *ui_mm1;
 extern lv_obj_t *ui_ss1;
@@ -32,13 +30,12 @@ extern lv_obj_t *ui_current_celcus;
 extern lv_obj_t *ui_current_pct;
 extern lv_obj_t *ui_icon_humid;
 extern lv_obj_t *ui_icon_temp;
-extern lv_obj_t *ui_temp_low;
-extern lv_obj_t *ui_humid_high;
-extern lv_obj_t *ui_temp_norm;
-extern lv_obj_t *ui_temp_high;
-extern lv_obj_t *ui_humid_norm;
-extern lv_obj_t *ui_humid_low;
 extern lv_obj_t *ui_market;
+extern lv_obj_t *ui_arc_temp;
+extern lv_obj_t *ui_arc_humid;
+extern lv_obj_t *ui_celcus;
+extern lv_obj_t *ui_pct;
+extern lv_obj_t *ui_temp_sub;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus
