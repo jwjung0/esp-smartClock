@@ -196,9 +196,9 @@ lv_obj_set_y( ui_arc_temp, 88 );
 lv_obj_set_align( ui_arc_temp, LV_ALIGN_CENTER );
 lv_arc_set_range(ui_arc_temp, 10,40);
 lv_arc_set_value(ui_arc_temp, 25);
-lv_obj_set_style_arc_width(ui_arc_temp, 8, LV_PART_MAIN| LV_STATE_DEFAULT);
+lv_obj_set_style_arc_width(ui_arc_temp, 6, LV_PART_MAIN| LV_STATE_DEFAULT);
 
-lv_obj_set_style_arc_width(ui_arc_temp, 8, LV_PART_INDICATOR| LV_STATE_DEFAULT);
+lv_obj_set_style_arc_width(ui_arc_temp, 6, LV_PART_INDICATOR| LV_STATE_DEFAULT);
 
 lv_obj_set_style_border_width(ui_arc_temp, 1, LV_PART_KNOB| LV_STATE_DEFAULT);
 
@@ -209,9 +209,9 @@ lv_obj_set_x( ui_arc_humid, 73 );
 lv_obj_set_y( ui_arc_humid, 88 );
 lv_obj_set_align( ui_arc_humid, LV_ALIGN_CENTER );
 lv_arc_set_value(ui_arc_humid, 50);
-lv_obj_set_style_arc_width(ui_arc_humid, 8, LV_PART_MAIN| LV_STATE_DEFAULT);
+lv_obj_set_style_arc_width(ui_arc_humid, 6, LV_PART_MAIN| LV_STATE_DEFAULT);
 
-lv_obj_set_style_arc_width(ui_arc_humid, 8, LV_PART_INDICATOR| LV_STATE_DEFAULT);
+lv_obj_set_style_arc_width(ui_arc_humid, 6, LV_PART_INDICATOR| LV_STATE_DEFAULT);
 
 lv_obj_set_style_border_width(ui_arc_humid, 1, LV_PART_KNOB| LV_STATE_DEFAULT);
 
