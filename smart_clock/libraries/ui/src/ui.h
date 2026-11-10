@@ -28,6 +28,7 @@ extern "C" {
 ///////////////////// SCREENS ////////////////////
 #include "screens/ui_loading.h"
 #include "screens/ui_home.h"
+#include "screens/ui_chart.h"
 
 ///////////////////// VARIABLES ////////////////////
 

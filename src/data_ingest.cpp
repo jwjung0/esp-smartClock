@@ -3,6 +3,7 @@
 #if defined(FIRMWARE_MODE_APP)
 
 #include "bme_sensor.h"
+#include "climate_history_fetch.h"
 #include "market_fetch.h"
 #include "wifi_config.h"
 
@@ -128,6 +129,8 @@ static void ingestNetTask(void * /*arg*/) {
 
   // Weather + quotes on the market task (not this one, not the UI).
   marketFetchRequestRefresh();
+  // History GET while radio is still up (sync; before deferred radio-off).
+  (void)climateHistoryFetchOnce();
   if (postAllowRadioOff) {
     deferRadioOff = true;
     deferRadioOffSinceMs = millis();

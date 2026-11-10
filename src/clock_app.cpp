@@ -7,6 +7,7 @@
 #include "bl_ctrl.h"
 #include "bme_sensor.h"
 #include "board_pins.h"
+#include "climate_history_fetch.h"
 #include "data_ingest.h"
 #include "light_sensor.h"
 #include "market_fetch.h"
@@ -36,6 +37,18 @@ static lv_disp_draw_buf_t draw_buf;
 static lv_color_t buf[kScreenW * kScreenH / 10];
 static TFT_eSPI tft = TFT_eSPI(kScreenW, kScreenH);
 static bool onHomeScreen = false;
+static bool onChartScreen = false;
+
+// Chart series buffers (SquareLine placeholders are too short).
+static lv_coord_t chartDailyT[CLIMATE_HISTORY_DAILY_N];
+static lv_coord_t chartDailyRh[CLIMATE_HISTORY_DAILY_N];
+static lv_coord_t chartMonthlyT[CLIMATE_HISTORY_MONTHLY_MAX];
+static lv_coord_t chartMonthlyRh[CLIMATE_HISTORY_MONTHLY_MAX];
+static lv_chart_series_t *chart1Temp = nullptr;
+static lv_chart_series_t *chart1Rh = nullptr;
+static lv_chart_series_t *chart2Temp = nullptr;
+static lv_chart_series_t *chart2Rh = nullptr;
+static bool chartSeriesBound = false;
 
 static uint32_t bootConfigUntilMs = 0;
 static uint32_t nextNtpSyncMs = 0;
@@ -47,6 +60,7 @@ static uint32_t lastCreepMs = 0;
 static bool idleSleepActive = false;
 
 static void setBacklight(bool on) { blCtrlSetOn(on); }
+static void lvglPump();
 
 // Cast before | — LV_PART_* and LV_STATE_* are different enums (GCC warning).
 static const lv_style_selector_t kMain =
@@ -289,11 +303,242 @@ static void fixNumericLabelWidths() {
   }
 }
 
+static void clearChartBuffers(void) {
+  for (size_t i = 0; i < CLIMATE_HISTORY_DAILY_N; ++i) {
+    chartDailyT[i] = LV_CHART_POINT_NONE;
+    chartDailyRh[i] = LV_CHART_POINT_NONE;
+  }
+  for (size_t i = 0; i < CLIMATE_HISTORY_MONTHLY_MAX; ++i) {
+    chartMonthlyT[i] = LV_CHART_POINT_NONE;
+    chartMonthlyRh[i] = LV_CHART_POINT_NONE;
+  }
+}
+
+static void findChartSeries(lv_obj_t *chart, lv_chart_series_t **tempOut,
+                            lv_chart_series_t **rhOut) {
+  if (tempOut)
+    *tempOut = nullptr;
+  if (rhOut)
+    *rhOut = nullptr;
+  if (!chart)
+    return;
+  for (lv_chart_series_t *s = lv_chart_get_series_next(chart, nullptr); s;
+       s = lv_chart_get_series_next(chart, s)) {
+    if (s->y_axis_sec) {
+      if (rhOut)
+        *rhOut = s;
+    } else if (tempOut) {
+      *tempOut = s;
+    }
+  }
+}
+
+// Daily: 5 evenly spaced majors (labels 0/6/12/18/23) + minors; vdiv=5 matches.
+static void applyDailyXAxis(lv_obj_t *chart) {
+  if (!chart)
+    return;
+  lv_chart_set_point_count(chart, CLIMATE_HISTORY_DAILY_N);
+  // major_cnt=5, minor_cnt=6 → majors at 0%,25%,50%,75%,100% (same as vdiv=5)
+  lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_X, 5, 3, 5, 6, true, 20);
+  // Y labels stay 3 (0/20/40); h-grid denser at 5. vdiv=5 ↔ X majors
+  lv_chart_set_div_line_count(chart, 5, 5);
+}
+
+// Monthly (≥8 days): major every 7 days + minor ticks between; vdiv = major count.
+static void applyMonthlyXAxis(lv_obj_t *chart, uint8_t days) {
+  if (!chart)
+    return;
+  if (days < 1)
+    days = 1;
+  if (days > CLIMATE_HISTORY_MONTHLY_MAX)
+    days = CLIMATE_HISTORY_MONTHLY_MAX;
+
+  lv_chart_set_point_count(chart, days);
+
+  uint8_t majorCnt;
+  uint8_t minorCnt;
+  if (days <= 7) {
+    // Too short for weekly majors — one tick per day.
+    majorCnt = days;
+    minorCnt = 1;
+  } else {
+    // majors at day index 0,7,14,… ; minors fill the 7-day gaps
+    majorCnt = (uint8_t)((days - 1) / 7 + 1);
+    minorCnt = 7;
+  }
+
+  lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_X, 5, 3, majorCnt,
+                         minorCnt, true, 20);
+  // Vertical grid lines match major X ticks only.
+  // Y labels stay 3 (0/20/40); h-grid denser at 5. vdiv matches X majors
+  lv_chart_set_div_line_count(chart, 5, majorCnt);
+}
+
+static void onChartXTickLabel(lv_event_t *e) {
+  lv_obj_draw_part_dsc_t *dsc = lv_event_get_draw_part_dsc(e);
+  if (!dsc || dsc->part != LV_PART_TICKS ||
+      dsc->type != LV_CHART_DRAW_PART_TICK_LABEL || !dsc->text ||
+      !dsc->label_dsc)
+    return;
+  if (dsc->id != LV_CHART_AXIS_PRIMARY_X)
+    return;
+
+  lv_obj_t *obj = lv_event_get_target(e);
+  const int v = (int)dsc->value;
+  if (obj == ui_Chart1) {
+    // major index 0..4 → hours 0/6/12/18/23 (aligned with 5 v-grid lines)
+    static const int kHours[] = {0, 6, 12, 18, 23};
+    if (v >= 0 && v < 5)
+      lv_snprintf(dsc->text, dsc->text_length, "%d", kHours[v]);
+    else
+      dsc->text[0] = '\0';
+  } else if (obj == ui_Chart2) {
+    const int days = (int)climateHistoryMonthDays();
+    // days>7: tick value is major index → dayIndex = v*7
+    // days<=7: tick value is day index
+    int dayIndex = (days > 7) ? (v * 7) : v;
+    if (dayIndex < 0)
+      dayIndex = 0;
+    if (days > 0 && dayIndex >= days)
+      dayIndex = days - 1;
+    int mon = 0, day = 0;
+    if (climateHistoryMonthDateAt((uint8_t)dayIndex, &mon, &day))
+      lv_snprintf(dsc->text, dsc->text_length, "%d", day);
+    else
+      lv_snprintf(dsc->text, dsc->text_length, "%d", dayIndex + 1);
+  }
+}
+
+static void updateChartTitles(void) {
+  struct tm localTm;
+  if (timeSyncGet(&localTm) && ui_daily) {
+    static const char *kDow[] = {"Sun", "Mon", "Tue", "Wed",
+                                 "Thu", "Fri", "Sat"};
+    const int wday =
+        (localTm.tm_wday >= 0 && localTm.tm_wday < 7) ? localTm.tm_wday : 0;
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%d/%d %s", localTm.tm_mon + 1, localTm.tm_mday,
+             kDow[wday]);
+    lv_label_set_text(ui_daily, buf);
+  }
+
+  if (ui_monthly) {
+    int sy = 0, sm = 0, sd = 0, ey = 0, em = 0, ed = 0;
+    char buf[32];
+    if (climateHistoryGetMonthlyStart(&sy, &sm, &sd) &&
+        climateHistoryGetMonthlyEnd(&ey, &em, &ed)) {
+      snprintf(buf, sizeof(buf), "%d/%d ~ %d/%d", sm, sd, em, ed);
+    } else {
+      snprintf(buf, sizeof(buf), "--/-- ~ --/--");
+    }
+    lv_label_set_text(ui_monthly, buf);
+  }
+}
+
+static void paintChartFromCache(void) {
+  if (!chartSeriesBound || !ui_Chart1 || !ui_Chart2)
+    return;
+
+  uint8_t days = climateHistoryMonthDays();
+  if (days < 1)
+    days = 1;
+  if (days > CLIMATE_HISTORY_MONTHLY_MAX)
+    days = CLIMATE_HISTORY_MONTHLY_MAX;
+
+  if (climateHistoryHasData()) {
+    (void)climateHistoryCopyDaily(
+        reinterpret_cast<int16_t *>(chartDailyT),
+        reinterpret_cast<int16_t *>(chartDailyRh), CLIMATE_HISTORY_DAILY_N);
+    (void)climateHistoryCopyMonthly(
+        reinterpret_cast<int16_t *>(chartMonthlyT),
+        reinterpret_cast<int16_t *>(chartMonthlyRh),
+        CLIMATE_HISTORY_MONTHLY_MAX, &days);
+  }
+
+  applyDailyXAxis(ui_Chart1);
+  applyMonthlyXAxis(ui_Chart2, days);
+  if (chart1Temp)
+    lv_chart_set_ext_y_array(ui_Chart1, chart1Temp, chartDailyT);
+  if (chart1Rh)
+    lv_chart_set_ext_y_array(ui_Chart1, chart1Rh, chartDailyRh);
+  if (chart2Temp)
+    lv_chart_set_ext_y_array(ui_Chart2, chart2Temp, chartMonthlyT);
+  if (chart2Rh)
+    lv_chart_set_ext_y_array(ui_Chart2, chart2Rh, chartMonthlyRh);
+
+  lv_chart_refresh(ui_Chart1);
+  lv_chart_refresh(ui_Chart2);
+  updateChartTitles();
+}
+
+static void setupChartWidgets(void) {
+  if (!ui_Chart1 || !ui_Chart2)
+    return;
+
+  clearChartBuffers();
+
+  lv_chart_set_range(ui_Chart1, LV_CHART_AXIS_PRIMARY_Y, 0, 40);
+  lv_chart_set_range(ui_Chart1, LV_CHART_AXIS_SECONDARY_Y, 0, 100);
+  // Daily X: 5 majors (0/6/12/18/23) + minors; v-grid matches majors
+  applyDailyXAxis(ui_Chart1);
+  // Left Y °C: 0/20/40; right Y %: 0/50/100
+  lv_chart_set_axis_tick(ui_Chart1, LV_CHART_AXIS_PRIMARY_Y, 5, 3, 3, 2, true,
+                         40);
+  lv_chart_set_axis_tick(ui_Chart1, LV_CHART_AXIS_SECONDARY_Y, 5, 3, 3, 2, true,
+                         30);
+
+  lv_chart_set_range(ui_Chart2, LV_CHART_AXIS_PRIMARY_Y, 0, 40);
+  lv_chart_set_range(ui_Chart2, LV_CHART_AXIS_SECONDARY_Y, 0, 100);
+  // Monthly X: major every 7 days + minors; v-grid matches majors
+  applyMonthlyXAxis(ui_Chart2, CLIMATE_HISTORY_MONTHLY_MAX);
+  lv_chart_set_axis_tick(ui_Chart2, LV_CHART_AXIS_PRIMARY_Y, 5, 3, 3, 2, true,
+                         40);
+  lv_chart_set_axis_tick(ui_Chart2, LV_CHART_AXIS_SECONDARY_Y, 5, 3, 3, 2, true,
+                         30);
+
+  findChartSeries(ui_Chart1, &chart1Temp, &chart1Rh);
+  findChartSeries(ui_Chart2, &chart2Temp, &chart2Rh);
+  if (chart1Temp)
+    lv_chart_set_ext_y_array(ui_Chart1, chart1Temp, chartDailyT);
+  if (chart1Rh)
+    lv_chart_set_ext_y_array(ui_Chart1, chart1Rh, chartDailyRh);
+  if (chart2Temp)
+    lv_chart_set_ext_y_array(ui_Chart2, chart2Temp, chartMonthlyT);
+  if (chart2Rh)
+    lv_chart_set_ext_y_array(ui_Chart2, chart2Rh, chartMonthlyRh);
+
+  lv_obj_add_event_cb(ui_Chart1, onChartXTickLabel, LV_EVENT_DRAW_PART_BEGIN,
+                      nullptr);
+  lv_obj_add_event_cb(ui_Chart2, onChartXTickLabel, LV_EVENT_DRAW_PART_BEGIN,
+                      nullptr);
+
+  chartSeriesBound = (chart1Temp && chart1Rh && chart2Temp && chart2Rh);
+  if (!chartSeriesBound)
+    Serial.println("chart: series bind incomplete");
+}
+
+static void chartUiPump() {
+  lvglPump();
+}
+
+static void showChart() {
+  styleSolidBlack(ui_chart);
+  setupChartWidgets();
+  paintChartFromCache();
+  (void)climateHistoryTakeUpdated();
+  lv_disp_load_scr(ui_chart);
+  onHomeScreen = false;
+  onChartScreen = true;
+  wifiConfigSetIdleCallback(chartUiPump);
+  lvglPump();
+}
+
 static void applyDarkTheme() {
   const lv_color_t white = lv_color_hex(0xFFFFFF);
 
   styleSolidBlack(ui_home);
   styleSolidBlack(ui_loading);
+  styleSolidBlack(ui_chart);
   lv_disp_set_bg_color(NULL, lv_color_hex(0x000000));
   lv_disp_set_bg_opa(NULL, LV_OPA_COVER);
 
@@ -815,7 +1060,8 @@ static void homeUiPump() {
   lvglPump();
 }
 
-static void showHome() {
+// Kept for later touch nav (debug boot uses showChart instead).
+__attribute__((unused)) static void showHome() {
   applyClockColors();
   struct tm localTm;
   if (timeSyncGet(&localTm))
@@ -826,6 +1072,7 @@ static void showHome() {
   nextClimateUiMs = millis() + kClimateUiMs;
   lv_disp_load_scr(ui_home);
   onHomeScreen = true;
+  onChartScreen = false;
   // During portal Connect / scan waits, wifiIdle() keeps the clock moving.
   wifiConfigSetIdleCallback(homeUiPump);
   // Apply ticker after home is the active screen so circular scroll starts.
@@ -870,9 +1117,12 @@ static bool ntpHadTime = false;
 
 static bool canIdleLightSleep(void) {
   // Market circular scroll needs frequent LVGL pumps — never deep-idle then.
-  return onHomeScreen && !bootConfigOpen && !wifiConfigIsRadioOn() &&
-         wifiConfigCmdIdle() && !marketFetchBusy() &&
-         ntpPhase == NtpPhase::Idle && !marketConfigIsVisible();
+  // Chart screen is static → idle OK when radio is off.
+  const bool marketScrollBlocks =
+      onHomeScreen && marketConfigIsVisible();
+  return (onHomeScreen || onChartScreen) && !bootConfigOpen &&
+         !wifiConfigIsRadioOn() && wifiConfigCmdIdle() && !marketFetchBusy() &&
+         ntpPhase == NtpPhase::Idle && !marketScrollBlocks;
 }
 
 static void serviceDailyNtp() {
@@ -1008,6 +1258,7 @@ void clockAppSetup() {
   blCtrlUpdateFromLux();
   weatherFetchBegin();
   marketFetchBegin();
+  climateHistoryFetchBegin();
   // Startup only: stay on the loading screen until quotes are in hand.
   // Later refreshes stay on the market task and paint when ready.
   if (wifiConfigIsConnected() && marketConfigIsVisible()) {
@@ -1023,6 +1274,14 @@ void clockAppSetup() {
       loadingPump();
     }
   }
+  // Boot history so chart is not empty until the first 10 min wake.
+  if (wifiConfigIsConnected()) {
+    showLoading("Fetching history...");
+    setLoadingProgress(90, true);
+    setLoadingCreepCeiling(98);
+    loadingPump();
+    (void)climateHistoryFetchOnce();
+  }
   dataIngestBegin();
 
   setLoadingProgress(100, true);
@@ -1031,9 +1290,8 @@ void clockAppSetup() {
   while (millis() - doneStart < 350)
     loadingPump();
 
-  showHome();
+  showHome();  // for prod, main screen
   powerSetRadioActive(wifiConfigIsRadioOn());
-  Serial.println("Home screen");
 }
 
 void clockAppLoop() {
@@ -1073,10 +1331,13 @@ void clockAppLoop() {
         uiDirty = true;
       }
     }
-    if ((int32_t)(millis() - nextLuxBlMs) >= 0) {
-      blCtrlUpdateFromLux();
-      nextLuxBlMs = millis() + kLuxBlMs;
-    }
+  }
+
+  // Auto-BL on home or chart (debug chart-only still needs lux).
+  if ((onHomeScreen || onChartScreen) &&
+      (int32_t)(millis() - nextLuxBlMs) >= 0) {
+    blCtrlUpdateFromLux();
+    nextLuxBlMs = millis() + kLuxBlMs;
   }
 
   if (wifiConfigTakeColorsChanged()) {
@@ -1114,6 +1375,10 @@ void clockAppLoop() {
   }
   if (onHomeScreen && marketFetchTakeUpdated()) {
     updateMarketUi();
+    lv_timer_handler();
+  }
+  if (onChartScreen && climateHistoryTakeUpdated()) {
+    paintChartFromCache();
     lv_timer_handler();
   }
   if (onHomeScreen)
