@@ -36,6 +36,9 @@ extern lv_obj_t *ui_arc_humid;
 extern lv_obj_t *ui_celcus;
 extern lv_obj_t *ui_pct;
 extern lv_obj_t *ui_temp_sub;
+extern lv_obj_t *ui_temp_hi;
+extern lv_obj_t *ui_temp_lo;
+extern lv_obj_t *ui_temp_fcst;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus

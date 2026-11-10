@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/time.h>
+#include <time.h>
 
 struct WeatherSnap {
   bool valid;
@@ -23,6 +24,9 @@ struct WeatherSnap {
   bool hasSun;
   time_t sunrise;
   time_t sunset;
+  bool hasHiLo;
+  float tempHiC;
+  float tempLoC;
 };
 
 static const char *kPrefsUiNs = "clockui";
@@ -42,6 +46,9 @@ static int cachedId = 0;
 static bool hasSunTimes = false;
 static time_t cachedSunrise = 0;
 static time_t cachedSunset = 0;
+static bool hasHiLo = false;
+static float cachedTempHiC = NAN;
+static float cachedTempLoC = NAN;
 
 static void loadSourcePrefs(void) {
   Preferences prefs;
@@ -73,6 +80,29 @@ static void clearSnap(WeatherSnap *s) {
   s->hasSun = false;
   s->sunrise = 0;
   s->sunset = 0;
+  s->hasHiLo = false;
+  s->tempHiC = NAN;
+  s->tempLoC = NAN;
+}
+
+// Normalize hi/lo and expand the band so current temp can sit on the bar.
+static void setSnapHiLo(WeatherSnap *s, float hi, float lo) {
+  if (!s || isnan(hi) || isnan(lo))
+    return;
+  if (hi < lo) {
+    const float tmp = hi;
+    hi = lo;
+    lo = tmp;
+  }
+  if (!isnan(s->tempC)) {
+    if (s->tempC > hi)
+      hi = s->tempC;
+    if (s->tempC < lo)
+      lo = s->tempC;
+  }
+  s->tempHiC = hi;
+  s->tempLoC = lo;
+  s->hasHiLo = true;
 }
 
 static void publishPreferred(void) {
@@ -108,6 +138,9 @@ static void publishPreferred(void) {
     hasSunTimes = false;
     cachedSunrise = 0;
     cachedSunset = 0;
+    hasHiLo = false;
+    cachedTempHiC = NAN;
+    cachedTempLoC = NAN;
     return;
   }
 
@@ -121,6 +154,9 @@ static void publishPreferred(void) {
   hasSunTimes = src->hasSun;
   cachedSunrise = src->sunrise;
   cachedSunset = src->sunset;
+  hasHiLo = src->hasHiLo;
+  cachedTempHiC = src->tempHiC;
+  cachedTempLoC = src->tempLoC;
 }
 
 // Map Naver wetrCd / wetrTxt → OpenWeather-style main + keep numeric wetrCd as id.
@@ -314,10 +350,27 @@ static bool fetchOpenWeather(void) {
     }
   }
 
+  const bool hasMin =
+      mainObj["temp_min"].is<float>() || mainObj["temp_min"].is<int>() ||
+      mainObj["temp_min"].is<double>();
+  const bool hasMax =
+      mainObj["temp_max"].is<float>() || mainObj["temp_max"].is<int>() ||
+      mainObj["temp_max"].is<double>();
+  if (hasMin && hasMax)
+    setSnapHiLo(&snap, mainObj["temp_max"].as<float>(),
+                mainObj["temp_min"].as<float>());
+
   snap.valid = true;
   owSnap = snap;
-  Serial.printf("weather fetch OW ok  T=%.1f RH=%.0f main=%s id=%d\n",
-                snap.tempC, snap.humidityPct, snap.main, snap.id);
+  if (snap.hasHiLo) {
+    Serial.printf(
+        "weather fetch OW ok  T=%.1f RH=%.0f main=%s id=%d hi=%.1f lo=%.1f\n",
+        snap.tempC, snap.humidityPct, snap.main, snap.id, snap.tempHiC,
+        snap.tempLoC);
+  } else {
+    Serial.printf("weather fetch OW ok  T=%.1f RH=%.0f main=%s id=%d\n",
+                  snap.tempC, snap.humidityPct, snap.main, snap.id);
+  }
   return true;
 }
 
@@ -410,10 +463,49 @@ static bool fetchNaver(void) {
     }
   }
 
+  // Today's daily hi/lo from weekly forecast (aplYmd = KST YYYYMMDD).
+  char todayYmd[16] = "";
+  {
+    time_t now = time(nullptr);
+    struct tm localTm;
+    if (now > 0 && localtime_r(&now, &localTm))
+      snprintf(todayYmd, sizeof(todayYmd), "%04d%02d%02d",
+               localTm.tm_year + 1900, localTm.tm_mon + 1, localTm.tm_mday);
+  }
+  JsonArray weekList =
+      doc["results"]["choiceResult"]["nowSynthesisFcast"]["weeklyFcastList"]
+          .as<JsonArray>();
+  if (!weekList.isNull() && weekList.size() > 0) {
+    JsonObject day = weekList[0].as<JsonObject>();
+    if (todayYmd[0]) {
+      for (JsonObject cand : weekList) {
+        const char *ymd = cand["aplYmd"] | "";
+        if (ymd[0] && strcmp(ymd, todayYmd) == 0) {
+          day = cand;
+          break;
+        }
+      }
+    }
+    const bool hasMin = day["minTmpr"].is<float>() || day["minTmpr"].is<int>() ||
+                        day["minTmpr"].is<double>();
+    const bool hasMax = day["maxTmpr"].is<float>() || day["maxTmpr"].is<int>() ||
+                        day["maxTmpr"].is<double>();
+    if (hasMin && hasMax)
+      setSnapHiLo(&snap, day["maxTmpr"].as<float>(), day["minTmpr"].as<float>());
+  }
+
   snap.valid = true;
   naverSnap = snap;
-  Serial.printf("weather fetch Naver ok  T=%.1f RH=%.0f main=%s wetrCd=%d txt=%s\n",
-                snap.tempC, snap.humidityPct, snap.main, snap.id, wetrTxt);
+  if (snap.hasHiLo) {
+    Serial.printf("weather fetch Naver ok  T=%.1f RH=%.0f main=%s wetrCd=%d "
+                  "txt=%s hi=%.1f lo=%.1f\n",
+                  snap.tempC, snap.humidityPct, snap.main, snap.id, wetrTxt,
+                  snap.tempHiC, snap.tempLoC);
+  } else {
+    Serial.printf(
+        "weather fetch Naver ok  T=%.1f RH=%.0f main=%s wetrCd=%d txt=%s\n",
+        snap.tempC, snap.humidityPct, snap.main, snap.id, wetrTxt);
+  }
   return true;
 }
 
@@ -430,6 +522,9 @@ void weatherFetchBegin(void) {
   hasSunTimes = false;
   cachedSunrise = 0;
   cachedSunset = 0;
+  hasHiLo = false;
+  cachedTempHiC = NAN;
+  cachedTempLoC = NAN;
   loadSourcePrefs();
 #if defined(FIRMWARE_MODE_CHECKUP)
   Serial.printf("weather fetch: Naver + OpenWeather (checkup), prefer=%s\n",
@@ -526,6 +621,16 @@ bool weatherFetchGetSunTimes(time_t *sunrise, time_t *sunset) {
   return true;
 }
 
+bool weatherFetchGetHiLo(float *hiC, float *loC) {
+  if (!hasData || !hasHiLo)
+    return false;
+  if (hiC)
+    *hiC = cachedTempHiC;
+  if (loC)
+    *loC = cachedTempLoC;
+  return true;
+}
+
 bool weatherFetchOnce(void) {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("weather fetch: not connected");
@@ -560,5 +665,6 @@ bool weatherConfigPreferNaver(void) { return true; }
 const char *weatherConfigSourceId(void) { return "naver"; }
 bool weatherConfigSetSource(const char *) { return false; }
 bool weatherFetchGetSunTimes(time_t *, time_t *) { return false; }
+bool weatherFetchGetHiLo(float *, float *) { return false; }
 
 #endif

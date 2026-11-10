@@ -34,6 +34,9 @@ bool weatherConfigSetSource(const char *src); // "naver" | "openweather"
 // UTC unix sunrise/sunset from preferred source (last successful fetch).
 bool weatherFetchGetSunTimes(time_t *sunrise, time_t *sunset);
 
+// Daily forecast high/low °C from preferred source (when available).
+bool weatherFetchGetHiLo(float *hiC, float *loC);
+
 #if defined(__cplusplus)
 }
 #endif

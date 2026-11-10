@@ -570,14 +570,16 @@ static void applyDarkTheme() {
     lv_obj_set_style_text_color(ui_celcus, white, kMain);
   if (ui_pct)
     lv_obj_set_style_text_color(ui_pct, white, kMain);
+  const lv_color_t wxTemp = lv_color_hex(0xFBB000);
+  const lv_color_t wxHumid = lv_color_hex(0x2EA7FF);
   if (ui_current_temp)
-    lv_obj_set_style_text_color(ui_current_temp, white, kMain);
+    lv_obj_set_style_text_color(ui_current_temp, wxTemp, kMain);
   if (ui_current_humid)
-    lv_obj_set_style_text_color(ui_current_humid, white, kMain);
+    lv_obj_set_style_text_color(ui_current_humid, wxHumid, kMain);
   if (ui_current_celcus)
-    lv_obj_set_style_text_color(ui_current_celcus, white, kMain);
+    lv_obj_set_style_text_color(ui_current_celcus, wxTemp, kMain);
   if (ui_current_pct)
-    lv_obj_set_style_text_color(ui_current_pct, white, kMain);
+    lv_obj_set_style_text_color(ui_current_pct, wxHumid, kMain);
 
   fixNumericLabelWidths();
 }
@@ -738,6 +740,10 @@ static void updateOutdoorWeatherUi() {
       lv_label_set_text(ui_current_temp, "--");
     if (ui_current_humid)
       lv_label_set_text(ui_current_humid, "--");
+    if (ui_temp_hi)
+      lv_label_set_text(ui_temp_hi, "--");
+    if (ui_temp_lo)
+      lv_label_set_text(ui_temp_lo, "--");
     setWeatherIcon(nullptr);
     return;
   }
@@ -756,6 +762,39 @@ static void updateOutdoorWeatherUi() {
       lv_label_set_text(ui_current_humid, buf);
     }
   }
+
+  float hi = 0, lo = 0;
+  if (weatherFetchGetHiLo(&hi, &lo)) {
+    char buf[16];
+    if (ui_temp_hi) {
+      snprintf(buf, sizeof(buf), "%.0f", (double)hi);
+      lv_label_set_text(ui_temp_hi, buf);
+    }
+    if (ui_temp_lo) {
+      snprintf(buf, sizeof(buf), "%.0f", (double)lo);
+      lv_label_set_text(ui_temp_lo, buf);
+    }
+    if (ui_temp_fcst) {
+      int loI = (int)lroundf(lo);
+      int hiI = (int)lroundf(hi);
+      if (hiI <= loI)
+        hiI = loI + 1;
+      int curI = (int)lroundf(t);
+      if (curI < loI)
+        curI = loI;
+      if (curI > hiI)
+        curI = hiI;
+      lv_bar_set_mode(ui_temp_fcst, LV_BAR_MODE_NORMAL);
+      lv_bar_set_range(ui_temp_fcst, loI, hiI);
+      lv_bar_set_value(ui_temp_fcst, curI, LV_ANIM_OFF);
+    }
+  } else {
+    if (ui_temp_hi)
+      lv_label_set_text(ui_temp_hi, "--");
+    if (ui_temp_lo)
+      lv_label_set_text(ui_temp_lo, "--");
+  }
+
   setWeatherIcon(mainBuf);
 }
 
