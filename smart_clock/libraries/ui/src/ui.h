@@ -29,6 +29,7 @@ extern "C" {
 #include "screens/ui_loading.h"
 #include "screens/ui_home.h"
 #include "screens/ui_chart.h"
+#include "screens/ui_putting.h"
 
 ///////////////////// VARIABLES ////////////////////
 

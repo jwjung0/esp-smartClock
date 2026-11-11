@@ -1,6 +1,7 @@
 SET(SOURCES screens/ui_loading.c
     screens/ui_home.c
     screens/ui_chart.c
+    screens/ui_putting.c
     ui.c
     components/ui_comp_hook.c
     ui_helpers.c

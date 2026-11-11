@@ -10,6 +10,7 @@ ESP32 digital clock with on-device temperature and humidity. Firmware is built a
 | 1.54" LCD (240×240 ST7789) | Time and sensor display         |
 | BME280, or BMP280 + AHT20  | Climate (T / RH / P)            |
 | VEML7700                   | Ambient lux → LCD backlight PWM |
+| 5-ch IR array (optional)   | Putting speed → mat / green roll |
 
 Supported boards (pin maps in `include/board_pins_*.h`):
 
@@ -55,6 +56,18 @@ Six-pin modules also have **CSB** / **SDO** (sometimes silk **CSR** / **SDK**). 
 
 Share the climate I2C bus on both boards (VEML `0x10` does not collide with BMx/AHT).
 
+**Putting IR array** — 7-pin module (`5V`, `GND`, five digital outs). Span **100 mm**, pitch **25 mm**. ESP inputs use `INPUT_PULLUP` and expect a **falling** edge when the ball breaks the beam. Do not feed raw 5 V TTL into ESP GPIO (use open-collector / 3.3 V-safe outs).
+
+| IR out | `s2mini` GPIO | `esp32dev` GPIO |
+| ------ | ------------- | --------------- |
+| OUT1   | 18 (D3)       | 4               |
+| OUT2   | 1             | 13              |
+| OUT3   | 2             | 14              |
+| OUT4   | 4             | 32              |
+| OUT5   | 6             | 33              |
+
+Portal → **Putting** opens `http://smartclock.local/putting` (or `http://192.168.4.1/putting` on SoftAP). Toggle LCD putting mode there; tape-calibrate mat μ; set green slow/normal/fast lengths in **meters**.
+
 ## Features
 
 **Now**
@@ -67,6 +80,7 @@ Share the climate I2C bus on both boards (VEML `0x10` does not collide with BMx/
 - NTP time sync in **KST (UTC+9)** → live `ui_time` / `ui_date`
 - Power policy: **10 min** config window after boot, then Wi‑Fi off; **daily** NTP resync; **every 10 min** climate data ingest (brief Wi‑Fi wake → POST → Naver weather + OpenWeather GET → Naver market GET → off). With radio off: CPU **80 MHz**, home loop idles until the next **1 Hz** colon/time tick (light sleep when auto-BL is off; timed wait when auto-BL PWM must stay running). Radio on → CPU **240 MHz**. Indoor auto-BL curve caps ~**70%** duty.
 - Climate ingest deploy targets: **local** (this Mac) vs **prod** (Ubuntu) via gitignored `include/ingest_config_*.h`
+- Putting mode (optional IR array): LCD `ui_putting` shows speed + mat distance + S/N/F green estimates; `/putting` page for live data, mat calibration, and green-speed settings. Wi‑Fi stays up while putting mode is on
 - Live indoor T/RH from BME280 on `ui_temp*` / `ui_humid`
 - Ambient lux from VEML7700 → auto LCD backlight brightness (PWM; no ingest). Indoor log curve (~10% night floor, ~70% day cap). Config portal **Backlight** switch turns auto on/off (off = full brightness; stored in NVS `clockui` / `bl_auto`). **Weather** source stored in NVS `clockui` / `wx_src` (`naver` | `openweather`)
 - Outdoor weather → `ui_current_temp`, `ui_current_humid`, image `ui_weather`: config portal **Weather** source (default **Naver**; optional **OpenWeather**). The other provider is used if the selected one fails. OpenWeather needs a free-tier 2.5 key (One Call 3.0/4.0 need a paid plan)
@@ -166,6 +180,9 @@ include/weather_config.h    # OpenWeather key/lat/lon + Naver region code (gitig
 src/main.cpp                # setup/loop — switches on FIRMWARE_MODE_*
 src/board_check.h/.cpp      # LED + serial smoke test
 src/clock_app.h/.cpp        # LVGL clock app
+src/putting_ir.h/.cpp       # 5× IR gate timing → speed / roll distances
+src/putting_html.h          # embedded web/putting.html
+web/putting.html            # putting portal page (embed via scripts/embed_putting_html.py)
 src/data_ingest.h/.cpp      # BME280 → HTTP climate ingest (10 min wake)
 src/weather_fetch.h/.cpp    # Naver KMA + OpenWeather 2.5 (HTTPS; Naver preferred)
 src/market_fetch.h/.cpp     # Naver Finance KS/KQ/Nasdaq/USD ticker (HTTPS)

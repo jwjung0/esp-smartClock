@@ -286,7 +286,7 @@ lv_obj_set_x( ui_temp_fcst, 111 );
 lv_obj_set_y( ui_temp_fcst, -66 );
 lv_obj_set_align( ui_temp_fcst, LV_ALIGN_CENTER );
 lv_obj_set_style_bg_color(ui_temp_fcst, lv_color_hex(0xFBE8A3), LV_PART_MAIN | LV_STATE_DEFAULT );
-lv_obj_set_style_bg_opa(ui_temp_fcst, 255, LV_PART_MAIN| LV_STATE_DEFAULT);
+lv_obj_set_style_bg_opa(ui_temp_fcst, 80, LV_PART_MAIN| LV_STATE_DEFAULT);
 lv_obj_set_style_transform_angle(ui_temp_fcst, -900, LV_PART_MAIN| LV_STATE_DEFAULT);
 
 lv_obj_set_style_bg_color(ui_temp_fcst, lv_color_hex(0xFB7000), LV_PART_INDICATOR | LV_STATE_DEFAULT );
