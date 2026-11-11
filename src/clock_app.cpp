@@ -22,6 +22,7 @@
 #include <esp_sleep.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <sys/time.h>
 
 static const uint16_t kScreenW = 240;
 static const uint16_t kScreenH = 240;
@@ -1040,14 +1041,17 @@ static void updateClimateUi() {
   paintClimateUi(bmeSensorRead(&t, &h, &p), t, h);
 }
 
-static void blinkColon() {
+// Returns true when colon visibility changed (needs LVGL flush).
+static bool blinkColon() {
   if (!colonDotTop || !colonDotBot)
-    return;
-  // 500 ms on / 500 ms off → full blink every 1 s (was 1 s/1 s via tm_sec).
+    return false;
+  // ON for first 500 ms of each wall-clock second (same edge as SS update).
   static int lastOn = -1;
-  const bool on = ((millis() / 500UL) & 1UL) == 0;
+  struct timeval tv;
+  gettimeofday(&tv, nullptr);
+  const bool on = tv.tv_usec < 500000L;
   if ((int)on == lastOn)
-    return;
+    return false;
   lastOn = (int)on;
   for (lv_obj_t *dot : {colonDotTop, colonDotBot}) {
     if (on)
@@ -1055,6 +1059,7 @@ static void blinkColon() {
     else
       lv_obj_add_flag(dot, LV_OBJ_FLAG_HIDDEN);
   }
+  return true;
 }
 
 static void paintTime(const struct tm &localTm) {
@@ -1100,7 +1105,7 @@ static void homeUiPump() {
         lv_refr_now(NULL);
       }
     } else {
-      blinkColon();
+      blinkColon(); // mid-second OFF; lvglPump flushes below
     }
   }
   lvglPump();
@@ -1364,9 +1369,9 @@ void clockAppLoop() {
         lv_timer_handler();
         lv_refr_now(NULL);
       }
-    } else {
-      // Half-second colon blink must run between second ticks.
-      blinkColon();
+    } else if (blinkColon()) {
+      // Mid-second OFF (~0.5 s) — flush without waiting for next SS tick.
+      uiDirty = true;
     }
     // Climate every 5 s — AHT20 needs ~80 ms; Request/Take avoid delay().
     if ((int32_t)(millis() - nextClimateUiMs) >= 0) {
