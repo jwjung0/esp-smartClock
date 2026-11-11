@@ -70,7 +70,7 @@ lv_obj_set_style_text_font(ui_ss1, &ui_font_orbitron_20, LV_PART_MAIN| LV_STATE_
 ui_current_temp = lv_label_create(ui_home);
 lv_obj_set_width( ui_current_temp, LV_SIZE_CONTENT);  /// 1
 lv_obj_set_height( ui_current_temp, LV_SIZE_CONTENT);   /// 1
-lv_obj_set_x( ui_current_temp, 65 );
+lv_obj_set_x( ui_current_temp, 63 );
 lv_obj_set_y( ui_current_temp, -96 );
 lv_obj_set_align( ui_current_temp, LV_ALIGN_CENTER );
 lv_label_set_text(ui_current_temp,"15");
@@ -81,7 +81,7 @@ lv_obj_set_style_text_font(ui_current_temp, &lv_font_montserrat_20, LV_PART_MAIN
 ui_current_humid = lv_label_create(ui_home);
 lv_obj_set_width( ui_current_humid, LV_SIZE_CONTENT);  /// 1
 lv_obj_set_height( ui_current_humid, LV_SIZE_CONTENT);   /// 1
-lv_obj_set_x( ui_current_humid, 65 );
+lv_obj_set_x( ui_current_humid, 63 );
 lv_obj_set_y( ui_current_humid, -75 );
 lv_obj_set_align( ui_current_humid, LV_ALIGN_CENTER );
 lv_label_set_text(ui_current_humid,"56");
@@ -92,7 +92,7 @@ lv_obj_set_style_text_font(ui_current_humid, &lv_font_montserrat_20, LV_PART_MAI
 ui_wkday = lv_label_create(ui_home);
 lv_obj_set_width( ui_wkday, LV_SIZE_CONTENT);  /// 1
 lv_obj_set_height( ui_wkday, LV_SIZE_CONTENT);   /// 1
-lv_obj_set_x( ui_wkday, -40 );
+lv_obj_set_x( ui_wkday, -43 );
 lv_obj_set_y( ui_wkday, -99 );
 lv_obj_set_align( ui_wkday, LV_ALIGN_CENTER );
 lv_label_set_text(ui_wkday,"MON");
@@ -103,7 +103,7 @@ lv_obj_set_style_text_font(ui_wkday, &lv_font_montserrat_22, LV_PART_MAIN| LV_ST
 ui_date = lv_label_create(ui_home);
 lv_obj_set_width( ui_date, LV_SIZE_CONTENT);  /// 1
 lv_obj_set_height( ui_date, LV_SIZE_CONTENT);   /// 1
-lv_obj_set_x( ui_date, -61 );
+lv_obj_set_x( ui_date, -64 );
 lv_obj_set_y( ui_date, -65 );
 lv_obj_set_align( ui_date, LV_ALIGN_CENTER );
 lv_label_set_text(ui_date,"26.10.26");
@@ -115,7 +115,7 @@ ui_wifi = lv_img_create(ui_home);
 lv_img_set_src(ui_wifi, &ui_img_539372687);
 lv_obj_set_width( ui_wifi, LV_SIZE_CONTENT);  /// 1
 lv_obj_set_height( ui_wifi, LV_SIZE_CONTENT);   /// 1
-lv_obj_set_x( ui_wifi, -95 );
+lv_obj_set_x( ui_wifi, -98 );
 lv_obj_set_y( ui_wifi, -100 );
 lv_obj_set_align( ui_wifi, LV_ALIGN_CENTER );
 lv_obj_add_flag( ui_wifi, LV_OBJ_FLAG_ADV_HITTEST );   /// Flags
@@ -133,7 +133,7 @@ lv_obj_clear_flag( ui_weather, LV_OBJ_FLAG_SCROLLABLE );    /// Flags
 
 ui_box1 = lv_obj_create(ui_home);
 lv_obj_remove_style_all(ui_box1);
-lv_obj_set_width( ui_box1, 121);
+lv_obj_set_width( ui_box1, 124);
 lv_obj_set_height( ui_box1, 66);
 lv_obj_set_x( ui_box1, 55 );
 lv_obj_set_y( ui_box1, -84 );
@@ -146,10 +146,10 @@ lv_obj_set_style_border_width(ui_box1, 1, LV_PART_MAIN| LV_STATE_DEFAULT);
 ui_current_celcus = lv_label_create(ui_home);
 lv_obj_set_width( ui_current_celcus, LV_SIZE_CONTENT);  /// 1
 lv_obj_set_height( ui_current_celcus, LV_SIZE_CONTENT);   /// 1
-lv_obj_set_x( ui_current_celcus, 83 );
+lv_obj_set_x( ui_current_celcus, 81 );
 lv_obj_set_y( ui_current_celcus, -100 );
 lv_obj_set_align( ui_current_celcus, LV_ALIGN_CENTER );
-lv_label_set_text(ui_current_celcus,"°");
+lv_label_set_text(ui_current_celcus,"°C");
 lv_obj_set_style_text_color(ui_current_celcus, lv_color_hex(0xFBB000), LV_PART_MAIN | LV_STATE_DEFAULT );
 lv_obj_set_style_text_opa(ui_current_celcus, 255, LV_PART_MAIN| LV_STATE_DEFAULT);
 lv_obj_set_style_text_font(ui_current_celcus, &lv_font_montserrat_10, LV_PART_MAIN| LV_STATE_DEFAULT);
@@ -157,7 +157,7 @@ lv_obj_set_style_text_font(ui_current_celcus, &lv_font_montserrat_10, LV_PART_MA
 ui_current_pct = lv_label_create(ui_home);
 lv_obj_set_width( ui_current_pct, LV_SIZE_CONTENT);  /// 1
 lv_obj_set_height( ui_current_pct, LV_SIZE_CONTENT);   /// 1
-lv_obj_set_x( ui_current_pct, 84 );
+lv_obj_set_x( ui_current_pct, 82 );
 lv_obj_set_y( ui_current_pct, -72 );
 lv_obj_set_align( ui_current_pct, LV_ALIGN_CENTER );
 lv_label_set_text(ui_current_pct,"%");
@@ -257,13 +257,13 @@ lv_obj_set_style_text_font(ui_temp_sub, &lv_font_montserrat_16, LV_PART_MAIN| LV
 ui_temp_hi = lv_label_create(ui_home);
 lv_obj_set_width( ui_temp_hi, LV_SIZE_CONTENT);  /// 1
 lv_obj_set_height( ui_temp_hi, LV_SIZE_CONTENT);   /// 1
-lv_obj_set_x( ui_temp_hi, 105 );
+lv_obj_set_x( ui_temp_hi, 106 );
 lv_obj_set_y( ui_temp_hi, -108 );
 lv_obj_set_align( ui_temp_hi, LV_ALIGN_CENTER );
 lv_label_set_text(ui_temp_hi,"43");
 lv_obj_set_style_text_color(ui_temp_hi, lv_color_hex(0x3EFEC4), LV_PART_MAIN | LV_STATE_DEFAULT );
 lv_obj_set_style_text_opa(ui_temp_hi, 255, LV_PART_MAIN| LV_STATE_DEFAULT);
-lv_obj_set_style_text_font(ui_temp_hi, &lv_font_montserrat_12, LV_PART_MAIN| LV_STATE_DEFAULT);
+lv_obj_set_style_text_font(ui_temp_hi, &lv_font_montserrat_14, LV_PART_MAIN| LV_STATE_DEFAULT);
 
 ui_temp_lo = lv_label_create(ui_home);
 lv_obj_set_width( ui_temp_lo, LV_SIZE_CONTENT);  /// 1
@@ -274,20 +274,22 @@ lv_obj_set_align( ui_temp_lo, LV_ALIGN_CENTER );
 lv_label_set_text(ui_temp_lo,"-15");
 lv_obj_set_style_text_color(ui_temp_lo, lv_color_hex(0xB7D9FC), LV_PART_MAIN | LV_STATE_DEFAULT );
 lv_obj_set_style_text_opa(ui_temp_lo, 255, LV_PART_MAIN| LV_STATE_DEFAULT);
-lv_obj_set_style_text_font(ui_temp_lo, &lv_font_montserrat_12, LV_PART_MAIN| LV_STATE_DEFAULT);
+lv_obj_set_style_text_font(ui_temp_lo, &lv_font_montserrat_14, LV_PART_MAIN| LV_STATE_DEFAULT);
 
 ui_temp_fcst = lv_bar_create(ui_home);
 lv_bar_set_range(ui_temp_fcst, -15,10);
 lv_bar_set_value(ui_temp_fcst,-4,LV_ANIM_OFF);
 lv_bar_set_start_value(ui_temp_fcst, 0, LV_ANIM_OFF);
-lv_obj_set_width( ui_temp_fcst, 36);
-lv_obj_set_height( ui_temp_fcst, 4);
-lv_obj_set_x( ui_temp_fcst, 113 );
-lv_obj_set_y( ui_temp_fcst, -65 );
+lv_obj_set_width( ui_temp_fcst, 34);
+lv_obj_set_height( ui_temp_fcst, 6);
+lv_obj_set_x( ui_temp_fcst, 111 );
+lv_obj_set_y( ui_temp_fcst, -66 );
 lv_obj_set_align( ui_temp_fcst, LV_ALIGN_CENTER );
+lv_obj_set_style_bg_color(ui_temp_fcst, lv_color_hex(0xFBE8A3), LV_PART_MAIN | LV_STATE_DEFAULT );
+lv_obj_set_style_bg_opa(ui_temp_fcst, 255, LV_PART_MAIN| LV_STATE_DEFAULT);
 lv_obj_set_style_transform_angle(ui_temp_fcst, -900, LV_PART_MAIN| LV_STATE_DEFAULT);
 
-lv_obj_set_style_bg_color(ui_temp_fcst, lv_color_hex(0xED7718), LV_PART_INDICATOR | LV_STATE_DEFAULT );
+lv_obj_set_style_bg_color(ui_temp_fcst, lv_color_hex(0xFB7000), LV_PART_INDICATOR | LV_STATE_DEFAULT );
 lv_obj_set_style_bg_opa(ui_temp_fcst, 255, LV_PART_INDICATOR| LV_STATE_DEFAULT);
 
 }

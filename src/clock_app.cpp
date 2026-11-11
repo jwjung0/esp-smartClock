@@ -1040,10 +1040,15 @@ static void updateClimateUi() {
   paintClimateUi(bmeSensorRead(&t, &h, &p), t, h);
 }
 
-static void blinkColon(const struct tm &localTm) {
+static void blinkColon() {
   if (!colonDotTop || !colonDotBot)
     return;
-  const bool on = (localTm.tm_sec & 1) == 0;
+  // 500 ms on / 500 ms off → full blink every 1 s (was 1 s/1 s via tm_sec).
+  static int lastOn = -1;
+  const bool on = ((millis() / 500UL) & 1UL) == 0;
+  if ((int)on == lastOn)
+    return;
+  lastOn = (int)on;
   for (lv_obj_t *dot : {colonDotTop, colonDotBot}) {
     if (on)
       lv_obj_clear_flag(dot, LV_OBJ_FLAG_HIDDEN);
@@ -1081,7 +1086,7 @@ static void paintTime(const struct tm &localTm) {
       refreshWeatherIconFromCache();
     }
   }
-  blinkColon(localTm);
+  blinkColon();
 }
 
 static void homeUiPump() {
@@ -1094,6 +1099,8 @@ static void homeUiPump() {
         lv_timer_handler();
         lv_refr_now(NULL);
       }
+    } else {
+      blinkColon();
     }
   }
   lvglPump();
@@ -1357,6 +1364,9 @@ void clockAppLoop() {
         lv_timer_handler();
         lv_refr_now(NULL);
       }
+    } else {
+      // Half-second colon blink must run between second ticks.
+      blinkColon();
     }
     // Climate every 5 s — AHT20 needs ~80 ms; Request/Take avoid delay().
     if ((int32_t)(millis() - nextClimateUiMs) >= 0) {
