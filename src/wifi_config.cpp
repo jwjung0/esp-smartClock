@@ -5,8 +5,6 @@
 #include "bl_ctrl.h"
 #include "market_fetch.h"
 #include "power_policy.h"
-#include "putting_html.h"
-#include "putting_ir.h"
 #include "weather_fetch.h"
 
 #include <ArduinoJson.h>
@@ -443,12 +441,6 @@ static void handleRoot() {
             "<p class=msg id=mkt_msg style=\"display:none\"></p>"
             "</section>");
 
-  html += F("<section class=box>"
-            "<h1>Putting</h1>"
-            "<p class=hint>IR ball speed, mat distance, and green estimates.</p>"
-            "<button type=button id=put_nav>Open Putting</button>"
-            "</section>");
-
   // Same basis as PlatformIO: sketch size vs running app partition (huge_app 3MB).
   const uint32_t flashUsed = ESP.getSketchSize();
   const esp_partition_t *appPart = esp_ota_get_running_partition();
@@ -640,8 +632,6 @@ static void handleRoot() {
             "if(document.getElementById('wx_naver').checked)wxPost('naver');});"
             "document.getElementById('wx_ow').addEventListener('change',()=>{"
             "if(document.getElementById('wx_ow').checked)wxPost('openweather');});"
-            "document.getElementById('put_nav').addEventListener('click',()=>{"
-            "location.href='/putting';});"
             "</script></body></html>");
 
   server.send(200, "text/html", html);
@@ -810,80 +800,6 @@ static void handleCaptive() {
   server.send(302, "text/plain", "");
 }
 
-static String puttingBody() {
-  String body = server.arg("plain");
-  if (!body.length())
-    body = server.arg("body");
-  return body;
-}
-
-static void handlePuttingPage() {
-  server.send(200, "text/html", PUTTING_HTML);
-}
-
-static void handlePuttingLive() {
-  String json;
-  puttingLiveJson(json);
-  server.send(200, "application/json", json);
-}
-
-static void handlePuttingMode() {
-  JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, puttingBody());
-  if (err) {
-    server.send(400, "application/json", "{\"ok\":false,\"err\":\"bad json\"}");
-    return;
-  }
-  const bool on = doc["enabled"] | false;
-  puttingSetEnabled(on);
-  server.send(200, "application/json", "{\"ok\":true}");
-}
-
-static void handlePuttingCal() {
-  JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, puttingBody());
-  if (err) {
-    server.send(400, "application/json", "{\"ok\":false,\"err\":\"bad json\"}");
-    return;
-  }
-  const float meters = doc["meters"] | 0.f;
-  String why;
-  if (!puttingCalibrate(meters, &why)) {
-    String resp = "{\"ok\":false,\"err\":\"";
-    resp += htmlEscape(why.length() ? why : String("failed"));
-    resp += "\"}";
-    server.send(400, "application/json", resp);
-    return;
-  }
-  server.send(200, "application/json", "{\"ok\":true}");
-}
-
-static void handlePuttingCalClear() {
-  puttingCalClear();
-  server.send(200, "application/json", "{\"ok\":true}");
-}
-
-static void handlePuttingGreens() {
-  JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, puttingBody());
-  if (err) {
-    server.send(400, "application/json", "{\"ok\":false,\"err\":\"bad json\"}");
-    return;
-  }
-  const float slow = doc["slow"] | 0.f;
-  const float normal = doc["normal"] | 0.f;
-  const float fast = doc["fast"] | 0.f;
-  String why;
-  if (!puttingSetGreens(slow, normal, fast, &why)) {
-    String resp = "{\"ok\":false,\"err\":\"";
-    resp += htmlEscape(why.length() ? why : String("failed"));
-    resp += "\"}";
-    server.send(400, "application/json", resp);
-    return;
-  }
-  server.send(200, "application/json", "{\"ok\":true}");
-}
-
 static void setupHttpRoutes() {
   server.on("/", HTTP_GET, handleRoot);
   server.on("/scan", HTTP_GET, handleScan);
@@ -893,12 +809,6 @@ static void setupHttpRoutes() {
   server.on("/weather", HTTP_POST, handleWeather);
   server.on("/market", HTTP_GET, handleMarketGet);
   server.on("/market", HTTP_POST, handleMarketPost);
-  server.on("/putting", HTTP_GET, handlePuttingPage);
-  server.on("/putting/live", HTTP_GET, handlePuttingLive);
-  server.on("/putting/mode", HTTP_POST, handlePuttingMode);
-  server.on("/putting/cal", HTTP_POST, handlePuttingCal);
-  server.on("/putting/cal/clear", HTTP_POST, handlePuttingCalClear);
-  server.on("/putting/greens", HTTP_POST, handlePuttingGreens);
   // Captive portal probes
   server.on("/generate_204", HTTP_GET, handleCaptive);
   server.on("/hotspot-detect.html", HTTP_GET, handleCaptive);

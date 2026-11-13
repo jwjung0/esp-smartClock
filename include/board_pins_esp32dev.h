@@ -22,11 +22,3 @@
 // VEML7700 ambient light — same bus as climate (Wire).
 #define PIN_VEML_SDA PIN_BME_SDA
 #define PIN_VEML_SCL PIN_BME_SCL
-
-// Putting IR array — 5 digital outs (INPUT_PULLUP; falling = ball).
-// Module: 5V / GND / OUT1..OUT5. Use OC outs or level-safe 3.3 V signals.
-#define PIN_PUT_IR0 4   // D4
-#define PIN_PUT_IR1 13  // D13
-#define PIN_PUT_IR2 14  // D14
-#define PIN_PUT_IR3 32  // D32
-#define PIN_PUT_IR4 33  // D33

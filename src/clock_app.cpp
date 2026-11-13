@@ -12,7 +12,6 @@
 #include "light_sensor.h"
 #include "market_fetch.h"
 #include "power_policy.h"
-#include "putting_ir.h"
 #include "time_sync.h"
 #include "weather_fetch.h"
 #include "wifi_config.h"
@@ -40,8 +39,6 @@ static lv_color_t buf[kScreenW * kScreenH / 10];
 static TFT_eSPI tft = TFT_eSPI(kScreenW, kScreenH);
 static bool onHomeScreen = false;
 static bool onChartScreen = false;
-static bool onPuttingScreen = false;
-static lv_obj_t *ui_put_greens = nullptr;
 
 // Chart series buffers (SquareLine placeholders are too short).
 static lv_coord_t chartDailyT[CLIMATE_HISTORY_DAILY_N];
@@ -534,81 +531,7 @@ __attribute__((unused)) static void showChart() {
   lv_disp_load_scr(ui_chart);
   onHomeScreen = false;
   onChartScreen = true;
-  onPuttingScreen = false;
   wifiConfigSetIdleCallback(chartUiPump);
-  lvglPump();
-}
-
-static void puttingSetSpinner(bool on) {
-  if (!ui_Spinner1)
-    return;
-  if (on) {
-    lv_obj_clear_flag(ui_Spinner1, LV_OBJ_FLAG_HIDDEN);
-    if (ui_speed)
-      lv_obj_add_flag(ui_speed, LV_OBJ_FLAG_HIDDEN);
-    if (ui_speed_unit)
-      lv_obj_add_flag(ui_speed_unit, LV_OBJ_FLAG_HIDDEN);
-  } else {
-    lv_obj_add_flag(ui_Spinner1, LV_OBJ_FLAG_HIDDEN);
-    if (ui_speed)
-      lv_obj_clear_flag(ui_speed, LV_OBJ_FLAG_HIDDEN);
-    if (ui_speed_unit)
-      lv_obj_clear_flag(ui_speed_unit, LV_OBJ_FLAG_HIDDEN);
-  }
-}
-
-static void paintPuttingShot(const PuttingShot &shot) {
-  char buf[24];
-  if (ui_speed) {
-    if (shot.valid)
-      snprintf(buf, sizeof(buf), "%.1f", shot.speed_mps);
-    else
-      snprintf(buf, sizeof(buf), "--");
-    lv_label_set_text(ui_speed, buf);
-  }
-  if (ui_dist) {
-    if (shot.valid)
-      snprintf(buf, sizeof(buf), "%.1f", shot.mat_m);
-    else
-      snprintf(buf, sizeof(buf), "--");
-    lv_label_set_text(ui_dist, buf);
-  }
-  if (ui_put_greens) {
-    if (shot.valid)
-      snprintf(buf, sizeof(buf), "S %.1f  N %.1f  F %.1f", shot.slow_m,
-               shot.normal_m, shot.fast_m);
-    else
-      snprintf(buf, sizeof(buf), "S --  N --  F --");
-    lv_label_set_text(ui_put_greens, buf);
-  }
-}
-
-static void puttingUiPump() { lvglPump(); }
-
-static void showPutting() {
-  styleSolidBlack(ui_putting);
-  if (!ui_put_greens && ui_putting) {
-    ui_put_greens = lv_label_create(ui_putting);
-    lv_obj_set_width(ui_put_greens, LV_SIZE_CONTENT);
-    lv_obj_set_height(ui_put_greens, LV_SIZE_CONTENT);
-    lv_obj_set_x(ui_put_greens, 0);
-    lv_obj_set_y(ui_put_greens, 108);
-    lv_obj_set_align(ui_put_greens, LV_ALIGN_CENTER);
-    lv_obj_set_style_text_color(ui_put_greens, lv_color_hex(0xAAAAAA), kMain);
-    lv_obj_set_style_text_font(ui_put_greens, &lv_font_montserrat_14, kMain);
-  }
-  PuttingShot shot = {};
-  if (puttingHasLastShot())
-    puttingGetLastShot(&shot);
-  else
-    shot.valid = false;
-  paintPuttingShot(shot);
-  puttingSetSpinner(puttingIsBusy());
-  lv_disp_load_scr(ui_putting);
-  onHomeScreen = false;
-  onChartScreen = false;
-  onPuttingScreen = true;
-  wifiConfigSetIdleCallback(puttingUiPump);
   lvglPump();
 }
 
@@ -618,7 +541,6 @@ static void applyDarkTheme() {
   styleSolidBlack(ui_home);
   styleSolidBlack(ui_loading);
   styleSolidBlack(ui_chart);
-  styleSolidBlack(ui_putting);
   lv_disp_set_bg_color(NULL, lv_color_hex(0x000000));
   lv_disp_set_bg_opa(NULL, LV_OPA_COVER);
 
@@ -730,7 +652,6 @@ static void showLoading(const char *status) {
   updateLoadingIp();
   lv_disp_load_scr(ui_loading);
   onHomeScreen = false;
-  onPuttingScreen = false;
   loadingPump();
   lv_refr_now(NULL); // full flush before backlight may turn on
 }
@@ -1203,7 +1124,6 @@ __attribute__((unused)) static void showHome() {
   lv_disp_load_scr(ui_home);
   onHomeScreen = true;
   onChartScreen = false;
-  onPuttingScreen = false;
   // During portal Connect / scan waits, wifiIdle() keeps the clock moving.
   wifiConfigSetIdleCallback(homeUiPump);
   // Apply ticker after home is the active screen so circular scroll starts.
@@ -1233,11 +1153,6 @@ static void waitForNtp() {
 static void closeBootConfigWindow() {
   if (!bootConfigOpen)
     return;
-  // Putting needs STA + HTTP for live/cal; keep radio until mode is off.
-  if (puttingIsEnabled()) {
-    Serial.println("Boot config window held (putting mode)");
-    return;
-  }
   bootConfigOpen = false;
   wifiConfigRadioOff();
   updateWifiIcon();
@@ -1256,9 +1171,8 @@ static bool canIdleLightSleep(void) {
   // Chart screen is static → idle OK when radio is off.
   const bool marketScrollBlocks =
       onHomeScreen && marketConfigIsVisible();
-  return (onHomeScreen || onChartScreen) && !onPuttingScreen &&
-         !puttingIsEnabled() && !bootConfigOpen && !wifiConfigIsRadioOn() &&
-         wifiConfigCmdIdle() && !marketFetchBusy() &&
+  return (onHomeScreen || onChartScreen) && !bootConfigOpen &&
+         !wifiConfigIsRadioOn() && wifiConfigCmdIdle() && !marketFetchBusy() &&
          ntpPhase == NtpPhase::Idle && !marketScrollBlocks;
 }
 
@@ -1420,7 +1334,6 @@ void clockAppSetup() {
     (void)climateHistoryFetchOnce();
   }
   dataIngestBegin();
-  puttingIrBegin();
 
   setLoadingProgress(100, true);
   setLoadingCreepCeiling(0);
@@ -1428,14 +1341,7 @@ void clockAppSetup() {
   while (millis() - doneStart < 350)
     loadingPump();
 
-  if (puttingIsEnabled()) {
-    // Keep portal/HTTP up for putting live + calibration.
-    bootConfigOpen = true;
-    bootConfigUntilMs = millis() + kBootConfigMs;
-    showPutting();
-  } else {
-    showHome();
-  }
+  showHome();
   powerSetRadioActive(wifiConfigIsRadioOn());
 }
 
@@ -1443,15 +1349,12 @@ void clockAppLoop() {
   bool didTimeTick = false;
   bool uiDirty = false;
 
-  puttingIrLoop();
-
   const bool radioOn = wifiConfigIsRadioOn();
   const bool marketScroll = marketBannerVisible();
   // 240 MHz only while Wi‑Fi is up; idle / market scroll run at 80 MHz.
   powerSetRadioActive(radioOn);
   powerSetUiBoost(false);
-  const bool needFastLvgl =
-      bootConfigOpen || radioOn || marketScroll || onPuttingScreen;
+  const bool needFastLvgl = bootConfigOpen || radioOn || marketScroll;
 
   // Keep UI alive first — WiFi/HTTP/I2C must not starve the clock.
   if (onHomeScreen) {
@@ -1534,34 +1437,6 @@ void clockAppLoop() {
   }
   if (onHomeScreen)
     updateWifiIcon();
-
-  if (puttingTakeModeChanged()) {
-    if (puttingIsEnabled()) {
-      bootConfigOpen = true;
-      bootConfigUntilMs = millis() + kBootConfigMs;
-      if (!wifiConfigIsRadioOn())
-        (void)wifiConfigRequestWake();
-      showPutting();
-      lv_timer_handler();
-    } else {
-      showHome();
-      lv_timer_handler();
-      if ((int32_t)(millis() - bootConfigUntilMs) >= 0)
-        closeBootConfigWindow();
-    }
-  }
-  if (onPuttingScreen) {
-    if (puttingTakeBusyChanged()) {
-      puttingSetSpinner(puttingIsBusy());
-      lv_timer_handler();
-    }
-    PuttingShot shot = {};
-    if (puttingTakeResult(&shot)) {
-      puttingSetSpinner(false);
-      paintPuttingShot(shot);
-      lv_timer_handler();
-    }
-  }
 
   if (canIdleLightSleep()) {
     if (!idleSleepActive) {
