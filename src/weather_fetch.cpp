@@ -468,9 +468,13 @@ static bool fetchNaver(void) {
   {
     time_t now = time(nullptr);
     struct tm localTm;
-    if (now > 0 && localtime_r(&now, &localTm))
-      snprintf(todayYmd, sizeof(todayYmd), "%04d%02d%02d",
-               localTm.tm_year + 1900, localTm.tm_mon + 1, localTm.tm_mday);
+    if (now > 0 && localtime_r(&now, &localTm)) {
+      const int y = localTm.tm_year + 1900;
+      const int m = localTm.tm_mon + 1;
+      const int d = localTm.tm_mday;
+      if (y >= 2000 && y <= 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31)
+        snprintf(todayYmd, sizeof(todayYmd), "%04d%02d%02d", y, m, d);
+    }
   }
   JsonArray weekList =
       doc["results"]["choiceResult"]["nowSynthesisFcast"]["weeklyFcastList"]
