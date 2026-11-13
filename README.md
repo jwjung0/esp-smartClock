@@ -64,6 +64,22 @@ Share the climate I2C bus on both boards (VEML `0x10` does not collide with BMx/
 | GND    | GND           | GND             |
 | OUT    | 18 (D3)       | 4               |
 
+### BOM (KRW)
+
+Reference unit prices for one build (esp32dev setup).
+
+| Part            | Spec                     |  Price (₩) |
+| --------------- | ------------------------ | ---------: |
+| ESP32           | DevKit                   |      7,200 |
+| LCD             | 1.54" ST7789 240×240     |      3,500 |
+| Temp / humidity | BME280 or BMP280 + AHT20 |      1,750 |
+| Ambient light   | VEML7700                 |      2,250 |
+| Case            | Enclosure                |      3,500 |
+| Battery         | 1000 mAh                 |      4,300 |
+| Power           | TP4056 + DC-DC 5V        |        900 |
+| Touch           | TTP223                   |        400 |
+| **Total**       |                          | **23,800** |
+
 ## Features
 
 **Now**
