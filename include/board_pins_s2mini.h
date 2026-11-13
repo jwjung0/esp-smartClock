@@ -27,3 +27,6 @@
 // VEML7700 ambient light — same bus as climate (Wire).
 #define PIN_VEML_SDA PIN_BME_SDA
 #define PIN_VEML_SCL PIN_BME_SCL
+
+// TTP223 capacitive touch — OUT active-high (AHL jumper open).
+#define PIN_TOUCH_OUT 18  // D3

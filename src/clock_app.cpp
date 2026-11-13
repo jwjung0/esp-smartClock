@@ -33,6 +33,7 @@ static const uint32_t kClimateUiMs = 5000; // refresh ui_temp / ui_humid
 static const uint32_t kLuxBlMs = 3000; // scan frequency for ambient sensor (VEML7700)
 static const uint32_t kProgressAnimMs = 500;
 static const uint32_t kCreepIntervalMs = 60;
+static const uint32_t kTouchDebounceMs = 50;
 
 static lv_disp_draw_buf_t draw_buf;
 static lv_color_t buf[kScreenW * kScreenH / 10];
@@ -59,9 +60,14 @@ static bool bootConfigOpen = false;
 static int loadingCreepCeiling = 0;
 static uint32_t lastCreepMs = 0;
 static bool idleSleepActive = false;
+static bool touchPrevHigh = false;
+static uint32_t touchStableSinceMs = 0;
+static bool touchStableHigh = false;
 
 static void setBacklight(bool on) { blCtrlSetOn(on); }
 static void lvglPump();
+static void showHome();
+static void showChart();
 
 // Cast before | — LV_PART_* and LV_STATE_* are different enums (GCC warning).
 static const lv_style_selector_t kMain =
@@ -522,8 +528,7 @@ __attribute__((unused)) static void chartUiPump() {
   lvglPump();
 }
 
-// Kept for later touch nav (debug boot can call showChart instead of showHome).
-__attribute__((unused)) static void showChart() {
+static void showChart() {
   styleSolidBlack(ui_chart);
   setupChartWidgets();
   paintChartFromCache();
@@ -1112,7 +1117,7 @@ static void homeUiPump() {
   lvglPump();
 }
 
-__attribute__((unused)) static void showHome() {
+static void showHome() {
   applyClockColors();
   struct tm localTm;
   if (timeSyncGet(&localTm))
@@ -1132,6 +1137,30 @@ __attribute__((unused)) static void showHome() {
   (void)marketFetchTakeUpdated();
   (void)marketConfigTakeVisibilityChanged();
   lvglPump();
+}
+
+// TTP223 active-high: rising edge toggles home ↔ chart (ignore loading).
+static void pollTouchNav(void) {
+  const bool rawHigh = digitalRead(PIN_TOUCH_OUT) == HIGH;
+  const uint32_t now = millis();
+  if (rawHigh != touchPrevHigh) {
+    touchPrevHigh = rawHigh;
+    touchStableSinceMs = now;
+    return;
+  }
+  if ((uint32_t)(now - touchStableSinceMs) < kTouchDebounceMs)
+    return;
+  if (rawHigh == touchStableHigh)
+    return;
+
+  const bool wasHigh = touchStableHigh;
+  touchStableHigh = rawHigh;
+  if (wasHigh || !rawHigh)
+    return; // only rising edge
+  if (onHomeScreen)
+    showChart();
+  else if (onChartScreen)
+    showHome();
 }
 
 static void waitForNtp() {
@@ -1268,6 +1297,13 @@ void clockAppSetup() {
 
   ui_init();
   applyDarkTheme();
+
+  pinMode(PIN_TOUCH_OUT, INPUT_PULLDOWN);
+  touchPrevHigh = digitalRead(PIN_TOUCH_OUT) == HIGH;
+  touchStableHigh = touchPrevHigh;
+  touchStableSinceMs = millis();
+  Serial.printf("TTP223 touch  OUT=GPIO%d (home↔chart)\n", PIN_TOUCH_OUT);
+
   // Creep progress during STA connect waits inside wifiConfigBegin.
   wifiConfigSetIdleCallback(loadingPump);
 
@@ -1348,6 +1384,8 @@ void clockAppSetup() {
 void clockAppLoop() {
   bool didTimeTick = false;
   bool uiDirty = false;
+
+  pollTouchNav();
 
   const bool radioOn = wifiConfigIsRadioOn();
   const bool marketScroll = marketBannerVisible();

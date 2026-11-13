@@ -10,6 +10,7 @@ ESP32 digital clock with on-device temperature and humidity. Firmware is built a
 | 1.54" LCD (240×240 ST7789) | Time and sensor display         |
 | BME280, or BMP280 + AHT20  | Climate (T / RH / P)            |
 | VEML7700                   | Ambient lux → LCD backlight PWM |
+| TTP223                     | Capacitive touch → home ↔ chart |
 
 Supported boards (pin maps in `include/board_pins_*.h`):
 
@@ -55,6 +56,14 @@ Six-pin modules also have **CSB** / **SDO** (sometimes silk **CSR** / **SDK**). 
 
 Share the climate I2C bus on both boards (VEML `0x10` does not collide with BMx/AHT).
 
+**Touch (TTP223)** — momentary, active-high OUT (leave AHL/TOG pads at factory default). Tap toggles LCD home ↔ climate chart.
+
+| TTP223 | `s2mini` GPIO | `esp32dev` GPIO |
+| ------ | ------------- | --------------- |
+| VCC    | 3V3           | 3V3             |
+| GND    | GND           | GND             |
+| OUT    | 18 (D3)       | 4               |
+
 ## Features
 
 **Now**
@@ -63,6 +72,7 @@ Share the climate I2C bus on both boards (VEML `0x10` does not collide with BMx/
 - App firmware is the default (LVGL clock UI); optional `checkup` mode for LED + LCD + serial smoke test
 - Board check: onboard LED blink, LCD color cycle, serial heartbeat
 - Clock UI on the 1.54" LCD (SquareLine / LVGL)
+- TTP223 touch toggles home ↔ climate chart (daily/monthly)
 - Wi‑Fi provisioning via local HTTP portal (SoftAP + STA)
 - NTP time sync in **KST (UTC+9)** → live `ui_time` / `ui_date`
 - Power policy: **10 min** config window after boot, then Wi‑Fi off; **daily** NTP resync; **every 10 min** climate data ingest (brief Wi‑Fi wake → POST → Naver weather + OpenWeather GET → Naver market GET → off). With radio off: CPU **80 MHz**, home loop idles until the next **1 Hz** colon/time tick (light sleep when auto-BL is off; timed wait when auto-BL PWM must stay running). Radio on → CPU **240 MHz**. Indoor auto-BL curve caps ~**70%** duty.
