@@ -321,6 +321,9 @@ static void clearChartBuffers(void) {
   }
 }
 
+static const int16_t kTempAxisFallbackMin = 0;
+static const int16_t kTempAxisFallbackMax = 40;
+
 static void findChartSeries(lv_obj_t *chart, lv_chart_series_t **tempOut,
                             lv_chart_series_t **rhOut) {
   if (tempOut)
@@ -347,7 +350,7 @@ static void applyDailyXAxis(lv_obj_t *chart) {
   lv_chart_set_point_count(chart, CLIMATE_HISTORY_DAILY_N);
   // major_cnt=5, minor_cnt=6 → majors at 0%,25%,50%,75%,100% (same as vdiv=5)
   lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_X, 5, 3, 5, 6, true, 20);
-  // Y labels stay 3 (0/20/40); h-grid denser at 5. vdiv=5 ↔ X majors
+  // Y labels stay 3 (dynamic min/mid/max); h-grid denser at 5. vdiv=5 ↔ X majors
   lv_chart_set_div_line_count(chart, 5, 5);
 }
 
@@ -377,7 +380,7 @@ static void applyMonthlyXAxis(lv_obj_t *chart, uint8_t days) {
   lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_X, 5, 3, majorCnt,
                          minorCnt, true, 20);
   // Vertical grid lines match major X ticks only.
-  // Y labels stay 3 (0/20/40); h-grid denser at 5. vdiv matches X majors
+  // Y labels stay 3 (dynamic min/mid/max); h-grid denser at 5. vdiv matches X majors
   lv_chart_set_div_line_count(chart, 5, majorCnt);
 }
 
@@ -462,6 +465,23 @@ static void paintChartFromCache(void) {
         CLIMATE_HISTORY_MONTHLY_MAX, &days);
   }
 
+  // Left Y °C: floor(min) / ceil(max) of climate temps (e.g. 25.4 → 26).
+  int16_t dailyYMin = kTempAxisFallbackMin;
+  int16_t dailyYMax = kTempAxisFallbackMax;
+  int16_t monthlyYMin = kTempAxisFallbackMin;
+  int16_t monthlyYMax = kTempAxisFallbackMax;
+  if (!climateHistoryGetDailyTempAxis(&dailyYMin, &dailyYMax)) {
+    dailyYMin = kTempAxisFallbackMin;
+    dailyYMax = kTempAxisFallbackMax;
+  }
+  if (!climateHistoryGetMonthlyTempAxis(&monthlyYMin, &monthlyYMax)) {
+    monthlyYMin = kTempAxisFallbackMin;
+    monthlyYMax = kTempAxisFallbackMax;
+  }
+  lv_chart_set_range(ui_Chart1, LV_CHART_AXIS_PRIMARY_Y, dailyYMin, dailyYMax);
+  lv_chart_set_range(ui_Chart2, LV_CHART_AXIS_PRIMARY_Y, monthlyYMin,
+                     monthlyYMax);
+
   applyDailyXAxis(ui_Chart1);
   applyMonthlyXAxis(ui_Chart2, days);
   if (chart1Temp)
@@ -488,7 +508,7 @@ static void setupChartWidgets(void) {
   lv_chart_set_range(ui_Chart1, LV_CHART_AXIS_SECONDARY_Y, 0, 100);
   // Daily X: 5 majors (0/6/12/18/23) + minors; v-grid matches majors
   applyDailyXAxis(ui_Chart1);
-  // Left Y °C: 0/20/40; right Y %: 0/50/100
+  // Left Y °C: 3 labels (dynamic); right Y %: 0/50/100
   lv_chart_set_axis_tick(ui_Chart1, LV_CHART_AXIS_PRIMARY_Y, 5, 3, 3, 2, true,
                          40);
   lv_chart_set_axis_tick(ui_Chart1, LV_CHART_AXIS_SECONDARY_Y, 5, 3, 3, 2, true,

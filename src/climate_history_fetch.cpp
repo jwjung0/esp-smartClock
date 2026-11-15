@@ -38,6 +38,10 @@ static int16_t dailyT[CLIMATE_HISTORY_DAILY_N];
 static int16_t dailyRh[CLIMATE_HISTORY_DAILY_N];
 static int16_t monthlyT[CLIMATE_HISTORY_MONTHLY_MAX];
 static int16_t monthlyRh[CLIMATE_HISTORY_MONTHLY_MAX];
+static float dailyTMin = NAN;
+static float dailyTMax = NAN;
+static float monthlyTMin = NAN;
+static float monthlyTMax = NAN;
 
 static void clearSeries(void) {
   for (size_t i = 0; i < CLIMATE_HISTORY_DAILY_N; ++i) {
@@ -51,6 +55,10 @@ static void clearSeries(void) {
   monthDays = 0;
   monthStart = {};
   monthEnd = {};
+  dailyTMin = NAN;
+  dailyTMax = NAN;
+  monthlyTMin = NAN;
+  monthlyTMax = NAN;
 }
 
 static int16_t toCoord(float v) {
@@ -62,6 +70,37 @@ static int16_t toCoord(float v) {
   if (r < -32767)
     return -32767;
   return (int16_t)r;
+}
+
+static void noteTempFloat(float v, float *mn, float *mx) {
+  if (!mn || !mx || isnan(v))
+    return;
+  if (isnan(*mn) || v < *mn)
+    *mn = v;
+  if (isnan(*mx) || v > *mx)
+    *mx = v;
+}
+
+static bool tempAxisFromFloats(float tmin, float tmax, int16_t *yminOut,
+                               int16_t *ymaxOut) {
+  if (!yminOut || !ymaxOut || isnan(tmin) || isnan(tmax))
+    return false;
+  // Axis ints: floor(min), ceil(max) — e.g. 25.4 → 26.
+  long lo = (long)floorf(tmin);
+  long hi = (long)ceilf(tmax);
+  if (lo > 32766)
+    lo = 32766;
+  if (lo < -32767)
+    lo = -32767;
+  if (hi > 32766)
+    hi = 32766;
+  if (hi < -32767)
+    hi = -32767;
+  if (lo >= hi)
+    hi = lo + 1;
+  *yminOut = (int16_t)lo;
+  *ymaxOut = (int16_t)hi;
+  return true;
 }
 
 static bool parseFloatOrNull(JsonVariantConst v, int16_t *out) {
@@ -76,6 +115,26 @@ static bool parseFloatOrNull(JsonVariantConst v, int16_t *out) {
     return true;
   }
   // Missing key → treat as null gap.
+  *out = LV_CHART_POINT_NONE;
+  return true;
+}
+
+// Like parseFloatOrNull, but also tracks float min/max for axis range.
+static bool parseTempOrNull(JsonVariantConst v, int16_t *out, float *mn,
+                            float *mx) {
+  if (!out)
+    return false;
+  if (v.isNull()) {
+    *out = LV_CHART_POINT_NONE;
+    return true;
+  }
+  if (v.is<float>() || v.is<double>() || v.is<int>() || v.is<long>()) {
+    const float f = v.as<float>();
+    *out = toCoord(f);
+    if (*out != LV_CHART_POINT_NONE)
+      noteTempFloat(f, mn, mx);
+    return true;
+  }
   *out = LV_CHART_POINT_NONE;
   return true;
 }
@@ -177,7 +236,7 @@ bool climateHistoryFetchOnce(void) {
         continue;
       int16_t t = LV_CHART_POINT_NONE;
       int16_t rh = LV_CHART_POINT_NONE;
-      (void)parseFloatOrNull(row["t"], &t);
+      (void)parseTempOrNull(row["t"], &t, &dailyTMin, &dailyTMax);
       (void)parseFloatOrNull(row["rh"], &rh);
       dailyT[h] = t;
       dailyRh[h] = rh;
@@ -212,7 +271,7 @@ bool climateHistoryFetchOnce(void) {
         monthlyRh[i] = rh;
         continue;
       }
-      (void)parseFloatOrNull(row["t"], &t);
+      (void)parseTempOrNull(row["t"], &t, &monthlyTMin, &monthlyTMax);
       (void)parseFloatOrNull(row["rh"], &rh);
       monthlyT[i] = t;
       monthlyRh[i] = rh;
@@ -304,6 +363,18 @@ bool climateHistoryCopyMonthly(int16_t *tempOut, int16_t *rhOut, size_t n,
   return true;
 }
 
+bool climateHistoryGetDailyTempAxis(int16_t *yminOut, int16_t *ymaxOut) {
+  if (!hasData)
+    return false;
+  return tempAxisFromFloats(dailyTMin, dailyTMax, yminOut, ymaxOut);
+}
+
+bool climateHistoryGetMonthlyTempAxis(int16_t *yminOut, int16_t *ymaxOut) {
+  if (!hasData)
+    return false;
+  return tempAxisFromFloats(monthlyTMin, monthlyTMax, yminOut, ymaxOut);
+}
+
 #else
 
 void climateHistoryFetchBegin(void) {}
@@ -318,5 +389,7 @@ bool climateHistoryCopyDaily(int16_t *, int16_t *, size_t) { return false; }
 bool climateHistoryCopyMonthly(int16_t *, int16_t *, size_t, uint8_t *) {
   return false;
 }
+bool climateHistoryGetDailyTempAxis(int16_t *, int16_t *) { return false; }
+bool climateHistoryGetMonthlyTempAxis(int16_t *, int16_t *) { return false; }
 
 #endif

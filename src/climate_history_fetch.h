@@ -34,6 +34,10 @@ bool climateHistoryCopyDaily(int16_t *tempOut, int16_t *rhOut, size_t n);
 bool climateHistoryCopyMonthly(int16_t *tempOut, int16_t *rhOut, size_t n,
                                uint8_t *daysOut);
 
+// PRIMARY_Y °C axis: floor(min) / ceil(max) of float samples. False if no temps.
+bool climateHistoryGetDailyTempAxis(int16_t *yminOut, int16_t *ymaxOut);
+bool climateHistoryGetMonthlyTempAxis(int16_t *yminOut, int16_t *ymaxOut);
+
 #if defined(__cplusplus)
 }
 #endif
