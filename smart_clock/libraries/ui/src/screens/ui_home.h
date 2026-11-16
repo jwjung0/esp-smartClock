@@ -39,6 +39,9 @@ extern lv_obj_t *ui_temp_sub;
 extern lv_obj_t *ui_temp_hi;
 extern lv_obj_t *ui_temp_lo;
 extern lv_obj_t *ui_temp_fcst;
+extern lv_obj_t *ui_banner;
+extern lv_obj_t *ui_moisture_label;
+extern lv_obj_t *ui_moisture;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus

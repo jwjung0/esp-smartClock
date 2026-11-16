@@ -5,6 +5,7 @@
 #include "bme_sensor.h"
 #include "climate_history_fetch.h"
 #include "market_fetch.h"
+#include "moisture_readings_fetch.h"
 #include "wifi_config.h"
 
 #include <HTTPClient.h>
@@ -131,6 +132,7 @@ static void ingestNetTask(void * /*arg*/) {
   marketFetchRequestRefresh();
   // History GET while radio is still up (sync; before deferred radio-off).
   (void)climateHistoryFetchOnce();
+  (void)moistureReadingsFetchOnce();
   if (postAllowRadioOff) {
     deferRadioOff = true;
     deferRadioOffSinceMs = millis();

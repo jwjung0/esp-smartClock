@@ -11,6 +11,7 @@
 #include "data_ingest.h"
 #include "light_sensor.h"
 #include "market_fetch.h"
+#include "moisture_readings_fetch.h"
 #include "power_policy.h"
 #include "time_sync.h"
 #include "weather_fetch.h"
@@ -22,6 +23,7 @@
 #include <esp_sleep.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <math.h>
 #include <sys/time.h>
 
 static const uint16_t kScreenW = 240;
@@ -40,17 +42,21 @@ static lv_color_t buf[kScreenW * kScreenH / 10];
 static TFT_eSPI tft = TFT_eSPI(kScreenW, kScreenH);
 static bool onHomeScreen = false;
 static bool onChartScreen = false;
+static bool onMoistureChartScreen = false;
 
 // Chart series buffers (SquareLine placeholders are too short).
 static lv_coord_t chartDailyT[CLIMATE_HISTORY_DAILY_N];
 static lv_coord_t chartDailyRh[CLIMATE_HISTORY_DAILY_N];
 static lv_coord_t chartMonthlyT[CLIMATE_HISTORY_MONTHLY_MAX];
 static lv_coord_t chartMonthlyRh[CLIMATE_HISTORY_MONTHLY_MAX];
+static lv_coord_t chartMoisturePct[MOISTURE_READINGS_DAILY_MAX];
 static lv_chart_series_t *chart1Temp = nullptr;
 static lv_chart_series_t *chart1Rh = nullptr;
 static lv_chart_series_t *chart2Temp = nullptr;
 static lv_chart_series_t *chart2Rh = nullptr;
+static lv_chart_series_t *chart3Moisture = nullptr;
 static bool chartSeriesBound = false;
+static bool moistureChartSeriesBound = false;
 
 static uint32_t bootConfigUntilMs = 0;
 static uint32_t nextNtpSyncMs = 0;
@@ -68,6 +74,8 @@ static void setBacklight(bool on) { blCtrlSetOn(on); }
 static void lvglPump();
 static void showHome();
 static void showChart();
+static void showMoistureChart();
+static void updateMoistureBannerUi();
 
 // Cast before | — LV_PART_* and LV_STATE_* are different enums (GCC warning).
 static const lv_style_selector_t kMain =
@@ -319,6 +327,8 @@ static void clearChartBuffers(void) {
     chartMonthlyT[i] = LV_CHART_POINT_NONE;
     chartMonthlyRh[i] = LV_CHART_POINT_NONE;
   }
+  for (size_t i = 0; i < MOISTURE_READINGS_DAILY_MAX; ++i)
+    chartMoisturePct[i] = LV_CHART_POINT_NONE;
 }
 
 static const int16_t kTempAxisFallbackMin = 0;
@@ -380,8 +390,10 @@ static void applyMonthlyXAxis(lv_obj_t *chart, uint8_t days) {
   lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_X, 5, 3, majorCnt,
                          minorCnt, true, 20);
   // Vertical grid lines match major X ticks only.
-  // Y labels stay 3 (dynamic min/mid/max); h-grid denser at 5. vdiv matches X majors
-  lv_chart_set_div_line_count(chart, 5, majorCnt);
+  // Y labels stay 3 (dynamic min/mid/max); h-grid denser at 5. vdiv matches X majors.
+  // LVGL draw_div_lines divides by (vdiv_cnt-1) — never pass 1 or the chip panics.
+  const uint8_t vdiv = (majorCnt < 2) ? 2 : majorCnt;
+  lv_chart_set_div_line_count(chart, 5, vdiv);
 }
 
 static void onChartXTickLabel(lv_event_t *e) {
@@ -413,6 +425,18 @@ static void onChartXTickLabel(lv_event_t *e) {
       dayIndex = days - 1;
     int mon = 0, day = 0;
     if (climateHistoryMonthDateAt((uint8_t)dayIndex, &mon, &day))
+      lv_snprintf(dsc->text, dsc->text_length, "%d", day);
+    else
+      lv_snprintf(dsc->text, dsc->text_length, "%d", dayIndex + 1);
+  } else if (obj == ui_chart3) {
+    const int days = (int)moistureReadingsDayCount();
+    int dayIndex = (days > 7) ? (v * 7) : v;
+    if (dayIndex < 0)
+      dayIndex = 0;
+    if (days > 0 && dayIndex >= days)
+      dayIndex = days - 1;
+    int mon = 0, day = 0;
+    if (moistureReadingsDateAt((uint8_t)dayIndex, &mon, &day))
       lv_snprintf(dsc->text, dsc->text_length, "%d", day);
     else
       lv_snprintf(dsc->text, dsc->text_length, "%d", dayIndex + 1);
@@ -548,6 +572,115 @@ __attribute__((unused)) static void chartUiPump() {
   lvglPump();
 }
 
+static void updateMoisturePeriodTitle(void) {
+  if (!ui_period)
+    return;
+  int sm = 0, sd = 0, em = 0, ed = 0;
+  char buf[40];
+  const uint8_t days = moistureReadingsDayCount();
+  if (moistureReadingsGetStart(nullptr, &sm, &sd) &&
+      moistureReadingsGetEnd(nullptr, &em, &ed) && days > 0) {
+    snprintf(buf, sizeof(buf), "%d/%d ~ %d/%d (%u days)", sm, sd, em, ed,
+             (unsigned)days);
+  } else {
+    snprintf(buf, sizeof(buf), "--/-- ~ --/--");
+  }
+  lv_label_set_text(ui_period, buf);
+}
+
+static void paintMoistureChartFromCache(void) {
+  if (!moistureChartSeriesBound || !ui_chart3 || !chart3Moisture)
+    return;
+
+  uint8_t days = moistureReadingsDayCount();
+  if (days < 1)
+    days = 1;
+  if (days > MOISTURE_READINGS_DAILY_MAX)
+    days = MOISTURE_READINGS_DAILY_MAX;
+
+  if (moistureReadingsHasData()) {
+    (void)moistureReadingsCopyDaily(
+        reinterpret_cast<int16_t *>(chartMoisturePct),
+        MOISTURE_READINGS_DAILY_MAX, &days);
+  }
+
+  // Bind large Y buffer before raising point_count (SquareLine stub is 10 pts).
+  lv_chart_set_ext_y_array(ui_chart3, chart3Moisture, chartMoisturePct);
+  lv_chart_set_range(ui_chart3, LV_CHART_AXIS_PRIMARY_Y, 0, 100);
+  applyMonthlyXAxis(ui_chart3, days);
+  lv_chart_set_axis_tick(ui_chart3, LV_CHART_AXIS_PRIMARY_Y, 5, 3, 6, 2, true,
+                         40);
+  lv_chart_refresh(ui_chart3);
+  updateMoisturePeriodTitle();
+}
+
+static void setupMoistureChartWidgets(void) {
+  if (!ui_chart3)
+    return;
+
+  for (size_t i = 0; i < MOISTURE_READINGS_DAILY_MAX; ++i)
+    chartMoisturePct[i] = LV_CHART_POINT_NONE;
+
+  chart3Moisture = nullptr;
+  for (lv_chart_series_t *s = lv_chart_get_series_next(ui_chart3, nullptr); s;
+       s = lv_chart_get_series_next(ui_chart3, s)) {
+    if (!s->y_axis_sec) {
+      chart3Moisture = s;
+      break;
+    }
+  }
+  if (!chart3Moisture) {
+    moistureChartSeriesBound = false;
+    Serial.println("moisture chart: series bind incomplete");
+    return;
+  }
+
+  // Ext buffer first (still at SquareLine's 10-point count), then raise count.
+  lv_chart_set_ext_y_array(ui_chart3, chart3Moisture, chartMoisturePct);
+  lv_chart_set_range(ui_chart3, LV_CHART_AXIS_PRIMARY_Y, 0, 100);
+  applyMonthlyXAxis(ui_chart3, MOISTURE_READINGS_DAILY_MAX);
+  lv_chart_set_axis_tick(ui_chart3, LV_CHART_AXIS_PRIMARY_Y, 5, 3, 6, 2, true,
+                         40);
+
+  static bool moistureTickCbAdded = false;
+  if (!moistureTickCbAdded) {
+    lv_obj_add_event_cb(ui_chart3, onChartXTickLabel, LV_EVENT_DRAW_PART_BEGIN,
+                        nullptr);
+    moistureTickCbAdded = true;
+  }
+
+  moistureChartSeriesBound = true;
+}
+
+static void updateMoistureBannerUi(void) {
+  if (!ui_banner || !ui_moisture_label || !ui_moisture)
+    return;
+
+  float pct = NAN;
+  if (!moistureReadingsLatestPct(&pct)) {
+    lv_obj_add_flag(ui_banner, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ui_moisture_label, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ui_moisture, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+
+  if (pct > 30.0f) {
+    lv_obj_add_flag(ui_banner, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ui_moisture_label, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ui_moisture, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+
+  const uint32_t bg = (pct <= 20.0f) ? 0x942C00u : 0x947300u;
+  lv_obj_set_style_bg_color(ui_banner, lv_color_hex(bg), kMain);
+  char buf[16];
+  snprintf(buf, sizeof(buf), "%d%%", (int)lroundf(pct));
+  lv_label_set_text(ui_moisture, buf);
+  lv_obj_clear_flag(ui_banner, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_clear_flag(ui_moisture_label, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_clear_flag(ui_moisture, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void showChart() {
   styleSolidBlack(ui_chart);
   setupChartWidgets();
@@ -556,6 +689,20 @@ static void showChart() {
   lv_disp_load_scr(ui_chart);
   onHomeScreen = false;
   onChartScreen = true;
+  onMoistureChartScreen = false;
+  wifiConfigSetIdleCallback(chartUiPump);
+  lvglPump();
+}
+
+static void showMoistureChart() {
+  styleSolidBlack(ui_moisture_chart);
+  setupMoistureChartWidgets();
+  paintMoistureChartFromCache();
+  (void)moistureReadingsTakeUpdated();
+  lv_disp_load_scr(ui_moisture_chart);
+  onHomeScreen = false;
+  onChartScreen = false;
+  onMoistureChartScreen = true;
   wifiConfigSetIdleCallback(chartUiPump);
   lvglPump();
 }
@@ -566,6 +713,7 @@ static void applyDarkTheme() {
   styleSolidBlack(ui_home);
   styleSolidBlack(ui_loading);
   styleSolidBlack(ui_chart);
+  styleSolidBlack(ui_moisture_chart);
   lv_disp_set_bg_color(NULL, lv_color_hex(0x000000));
   lv_disp_set_bg_opa(NULL, LV_OPA_COVER);
 
@@ -677,6 +825,8 @@ static void showLoading(const char *status) {
   updateLoadingIp();
   lv_disp_load_scr(ui_loading);
   onHomeScreen = false;
+  onChartScreen = false;
+  onMoistureChartScreen = false;
   loadingPump();
   lv_refr_now(NULL); // full flush before backlight may turn on
 }
@@ -1149,17 +1299,19 @@ static void showHome() {
   lv_disp_load_scr(ui_home);
   onHomeScreen = true;
   onChartScreen = false;
+  onMoistureChartScreen = false;
   // During portal Connect / scan waits, wifiIdle() keeps the clock moving.
   wifiConfigSetIdleCallback(homeUiPump);
   // Apply ticker after home is the active screen so circular scroll starts.
   applyMarketVisibility();
   updateMarketUi();
+  updateMoistureBannerUi();
   (void)marketFetchTakeUpdated();
   (void)marketConfigTakeVisibilityChanged();
   lvglPump();
 }
 
-// TTP223 active-high: rising edge toggles home ↔ chart (ignore loading).
+// TTP223 active-high: rising edge cycles home → climate → moisture → home.
 static void pollTouchNav(void) {
   const bool rawHigh = digitalRead(PIN_TOUCH_OUT) == HIGH;
   const uint32_t now = millis();
@@ -1180,6 +1332,8 @@ static void pollTouchNav(void) {
   if (onHomeScreen)
     showChart();
   else if (onChartScreen)
+    showMoistureChart();
+  else if (onMoistureChartScreen)
     showHome();
 }
 
@@ -1220,9 +1374,10 @@ static bool canIdleLightSleep(void) {
   // Chart screen is static → idle OK when radio is off.
   const bool marketScrollBlocks =
       onHomeScreen && marketConfigIsVisible();
-  return (onHomeScreen || onChartScreen) && !bootConfigOpen &&
-         !wifiConfigIsRadioOn() && wifiConfigCmdIdle() && !marketFetchBusy() &&
-         ntpPhase == NtpPhase::Idle && !marketScrollBlocks;
+  return (onHomeScreen || onChartScreen || onMoistureChartScreen) &&
+         !bootConfigOpen && !wifiConfigIsRadioOn() && wifiConfigCmdIdle() &&
+         !marketFetchBusy() && ntpPhase == NtpPhase::Idle &&
+         !marketScrollBlocks;
 }
 
 static void serviceDailyNtp() {
@@ -1322,7 +1477,8 @@ void clockAppSetup() {
   touchPrevHigh = digitalRead(PIN_TOUCH_OUT) == HIGH;
   touchStableHigh = touchPrevHigh;
   touchStableSinceMs = millis();
-  Serial.printf("TTP223 touch  OUT=GPIO%d (home↔chart)\n", PIN_TOUCH_OUT);
+  Serial.printf("TTP223 touch  OUT=GPIO%d (home→climate→moisture)\n",
+                PIN_TOUCH_OUT);
 
   // Creep progress during STA connect waits inside wifiConfigBegin.
   wifiConfigSetIdleCallback(loadingPump);
@@ -1366,6 +1522,7 @@ void clockAppSetup() {
   weatherFetchBegin();
   marketFetchBegin();
   climateHistoryFetchBegin();
+  moistureReadingsFetchBegin();
   // Startup only: stay on the loading screen until quotes are in hand.
   // Later refreshes stay on the market task and paint when ready.
   if (wifiConfigIsConnected() && marketConfigIsVisible()) {
@@ -1388,6 +1545,7 @@ void clockAppSetup() {
     setLoadingCreepCeiling(98);
     loadingPump();
     (void)climateHistoryFetchOnce();
+    (void)moistureReadingsFetchOnce();
   }
   dataIngestBegin();
 
@@ -1446,7 +1604,7 @@ void clockAppLoop() {
   }
 
   // Auto-BL on home or chart (debug chart-only still needs lux).
-  if ((onHomeScreen || onChartScreen) &&
+  if ((onHomeScreen || onChartScreen || onMoistureChartScreen) &&
       (int32_t)(millis() - nextLuxBlMs) >= 0) {
     blCtrlUpdateFromLux();
     nextLuxBlMs = millis() + kLuxBlMs;
@@ -1491,6 +1649,13 @@ void clockAppLoop() {
   }
   if (onChartScreen && climateHistoryTakeUpdated()) {
     paintChartFromCache();
+    lv_timer_handler();
+  }
+  if (moistureReadingsTakeUpdated()) {
+    if (onHomeScreen)
+      updateMoistureBannerUi();
+    if (onMoistureChartScreen)
+      paintMoistureChartFromCache();
     lv_timer_handler();
   }
   if (onHomeScreen)

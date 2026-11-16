@@ -50,7 +50,7 @@ lv_obj_set_style_bg_color(ui_Chart1, lv_color_hex(0x000000), LV_PART_MAIN | LV_S
 lv_obj_set_style_bg_opa(ui_Chart1, 0, LV_PART_MAIN| LV_STATE_DEFAULT);
 lv_obj_set_style_border_width(ui_Chart1, 1, LV_PART_MAIN| LV_STATE_DEFAULT);
 
-lv_obj_set_style_size(ui_Chart1, 5, LV_PART_INDICATOR| LV_STATE_DEFAULT);
+lv_obj_set_style_size(ui_Chart1, 4, LV_PART_INDICATOR| LV_STATE_DEFAULT);
 
 lv_obj_set_style_line_color(ui_Chart1, lv_color_hex(0x808080), LV_PART_TICKS | LV_STATE_DEFAULT );
 lv_obj_set_style_line_opa(ui_Chart1, 255, LV_PART_TICKS| LV_STATE_DEFAULT);
@@ -93,7 +93,7 @@ lv_obj_set_style_bg_color(ui_Chart2, lv_color_hex(0x000000), LV_PART_MAIN | LV_S
 lv_obj_set_style_bg_opa(ui_Chart2, 0, LV_PART_MAIN| LV_STATE_DEFAULT);
 lv_obj_set_style_border_width(ui_Chart2, 1, LV_PART_MAIN| LV_STATE_DEFAULT);
 
-lv_obj_set_style_size(ui_Chart2, 5, LV_PART_INDICATOR| LV_STATE_DEFAULT);
+lv_obj_set_style_size(ui_Chart2, 4, LV_PART_INDICATOR| LV_STATE_DEFAULT);
 
 lv_obj_set_style_line_color(ui_Chart2, lv_color_hex(0x808080), LV_PART_TICKS | LV_STATE_DEFAULT );
 lv_obj_set_style_line_opa(ui_Chart2, 255, LV_PART_TICKS| LV_STATE_DEFAULT);
