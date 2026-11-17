@@ -15,7 +15,7 @@
 
 #define ST7789_DRIVER
 #define TFT_WIDTH  240
-#define TFT_HEIGHT 240
+#define TFT_HEIGHT 320
 
 #define TFT_MOSI PIN_TFT_MOSI
 #define TFT_SCLK PIN_TFT_SCLK
@@ -26,8 +26,11 @@
 // (white flash). App owns PIN_TFT_BL and enables it only after a black frame.
 #define TFT_MISO -1
 
-// Many 1.54" IPS ST7789 panels need inversion to show a normal image.
+// IPS ST7789 needs inversion for correct black (same as old panel).
 #define TFT_INVERSION_ON
+// 240x320 no longer auto-sets CGRAM_OFFSET (BGR). Force BGR or R/B swap
+// (yellow↔cyan, blue Wi‑Fi↔yellow).
+#define TFT_RGB_ORDER 0
 
 #define LOAD_GLCD
 // 10 MHz is more reliable on Dupont jumpers than 40 MHz.

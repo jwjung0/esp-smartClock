@@ -11,7 +11,7 @@
 #define BOARD_LED_PIN 15  // onboard LED (not a D-pin)
 #endif
 
-// ST7789 1.54" 240x240 — SPI (panel SDA/SCL = MOSI/SCLK).
+// ST7789 2.4" 240x320 — SPI (panel SDA/SCL = MOSI/SCLK).
 #define PIN_TFT_MOSI 11  // D7
 #define PIN_TFT_SCLK 7   // D5
 #define PIN_TFT_CS   13  // D8

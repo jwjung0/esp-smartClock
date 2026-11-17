@@ -18,7 +18,7 @@
 static const int LED_PIN = BOARD_LED_PIN;
 static const unsigned long STEP_MS = 1200;
 static const uint16_t kScreenW = 240;
-static const uint16_t kScreenH = 240;
+static const uint16_t kScreenH = 320;
 static const uint32_t kSpiHz = 8000000;
 
 static Adafruit_ST7789 tft =
@@ -176,7 +176,7 @@ static void blinkBacklight() {
   }
   blCtrlSetOn(true);
   Serial.println(
-      "If BL did not blink, move LCD BL wire to GPIO22 (D22), not 3V3");
+      "If BL did not blink, move LCD BL wire to GPIO19 (D19), not 3V3");
 }
 
 static void lcdShowColor(size_t idx) {
@@ -202,7 +202,7 @@ static bool lcdBegin() {
   SPI.begin(PIN_TFT_SCLK, -1 /* MISO */, PIN_TFT_MOSI, PIN_TFT_CS);
   tft.init(kScreenW, kScreenH);
   tft.setSPISpeed(kSpiHz);
-  tft.setRotation(3); // 270° CW / 90° CCW
+  tft.setRotation(0); // 0° (was 3; +90° CW)
   tft.invertDisplay(true);
   blCtrlSetOn(true);
   lcdShowColor(0);

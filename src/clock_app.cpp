@@ -27,7 +27,7 @@
 #include <sys/time.h>
 
 static const uint16_t kScreenW = 240;
-static const uint16_t kScreenH = 240;
+static const uint16_t kScreenH = 320;
 static const uint32_t kNtpWaitMs = 15000;
 static const uint32_t kBootConfigMs = 10UL * 60UL * 1000UL; // portal window
 static const uint32_t kDailySyncMs = 24UL * 60UL * 60UL * 1000UL;
@@ -37,8 +37,11 @@ static const uint32_t kProgressAnimMs = 500;
 static const uint32_t kCreepIntervalMs = 60;
 static const uint32_t kTouchDebounceMs = 50;
 
+// Partial LVGL buffer — keep size tied to width only so a taller panel
+// does not steal BSS from Wi‑Fi / TLS (Naver HTTPS market fetch).
+static const uint16_t kDrawBufPixels = kScreenW * 24; // same bytes as old 240x240/10
 static lv_disp_draw_buf_t draw_buf;
-static lv_color_t buf[kScreenW * kScreenH / 10];
+static lv_color_t buf[kDrawBufPixels];
 static TFT_eSPI tft = TFT_eSPI(kScreenW, kScreenH);
 static bool onHomeScreen = false;
 static bool onChartScreen = false;
@@ -463,7 +466,7 @@ static void updateChartTitles(void) {
         climateHistoryGetMonthlyEnd(&ey, &em, &ed)) {
       snprintf(buf, sizeof(buf), "%d/%d ~ %d/%d", sm, sd, em, ed);
     } else {
-      snprintf(buf, sizeof(buf), "--/-- ~ --/--");
+      snprintf(buf, sizeof(buf), "--/--");
     }
     lv_label_set_text(ui_monthly, buf);
   }
@@ -583,7 +586,7 @@ static void updateMoisturePeriodTitle(void) {
     snprintf(buf, sizeof(buf), "%d/%d ~ %d/%d (%u days)", sm, sd, em, ed,
              (unsigned)days);
   } else {
-    snprintf(buf, sizeof(buf), "--/-- ~ --/--");
+    snprintf(buf, sizeof(buf), "--/--");
   }
   lv_label_set_text(ui_period, buf);
 }
@@ -1058,7 +1061,7 @@ static void updateMarketUi() {
   lv_label_set_long_mode(ui_market, LV_LABEL_LONG_SCROLL_CIRCULAR);
 
   if (!marketFetchHasData() || marketFetchCount() == 0) {
-    lv_label_set_text(ui_market, "KS --.-- --.--%  KQ --.-- --.--%");
+    lv_label_set_text(ui_market, "KS --  KQ --");
     return;
   }
 
@@ -1090,7 +1093,7 @@ static void updateMarketUi() {
   }
 
   if (used == 0)
-    lv_label_set_text(ui_market, "KS --.-- --.--%  KQ --.-- --.--%");
+    lv_label_set_text(ui_market, "KS --  KQ --");
   else
     lv_label_set_text(ui_market, line);
 }
@@ -1447,14 +1450,14 @@ void clockAppSetup() {
   lv_init();
 
   tft.begin();
-  // 270° clockwise (90° CCW) on 240x240 ST7789.
-  tft.setRotation(3);
+  // Portrait on 240x320 ST7789.
+  tft.setRotation(0);
   tft.fillScreen(TFT_BLACK);
   Serial.printf("TFT setup %s  MOSI=%d SCLK=%d CS=%d DC=%d RST=%d BL=%d\n",
                 USER_SETUP_INFO, PIN_TFT_MOSI, PIN_TFT_SCLK, PIN_TFT_CS,
                 PIN_TFT_DC, PIN_TFT_RST, PIN_TFT_BL);
 
-  lv_disp_draw_buf_init(&draw_buf, buf, NULL, kScreenW * kScreenH / 10);
+  lv_disp_draw_buf_init(&draw_buf, buf, NULL, kDrawBufPixels);
 
   static lv_disp_drv_t disp_drv;
   lv_disp_drv_init(&disp_drv);

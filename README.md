@@ -4,13 +4,13 @@ ESP32 digital clock with on-device temperature and humidity. Firmware is built a
 
 ## Hardware
 
-| Part                       | Role                            |
-| -------------------------- | ------------------------------- |
-| MCU (pick one at build)    | Wi‑Fi; see boards below         |
-| 1.54" LCD (240×240 ST7789) | Time and sensor display         |
-| BME280, or BMP280 + AHT20  | Climate (T / RH / P)            |
-| VEML7700                   | Ambient lux → LCD backlight PWM |
-| TTP223                     | Capacitive touch → home ↔ chart |
+| Part                      | Role                            |
+| ------------------------- | ------------------------------- |
+| MCU (pick one at build)   | Wi‑Fi; see boards below         |
+| 2.4" LCD (240×320 ST7789) | Time and sensor display         |
+| BME280, or BMP280 + AHT20 | Climate (T / RH / P)            |
+| VEML7700                  | Ambient lux → LCD backlight PWM |
+| TTP223                    | Capacitive touch → home ↔ chart |
 
 Supported boards (pin maps in `include/board_pins_*.h`):
 
@@ -25,12 +25,12 @@ Supported boards (pin maps in `include/board_pins_*.h`):
 | --- | ------------- | --------------- |
 | VCC | 3V3           | 3V3             |
 | GND | GND           | GND             |
-| SDA | 11 (D7)       | 23 (D23 / MOSI) |
+| SDA | 11 (D7)       | 21 (D21)        |
 | SCL | 7 (D5)        | 18 (D18 / SCK)  |
 | CS  | 13 (D8)       | 5 (D5 / SS)     |
 | DC  | 5 (D0)        | 16 (RX2)        |
 | RST | 3 (A0)        | 17 (TX2)        |
-| BL  | 16 (D4)       | 22 (D22)        |
+| BL  | 16 (D4)       | 19 (D19)        |
 
 LCD panel **SDA/SCL are SPI** (MOSI/SCLK), not the BME280 I2C pins. VCC must be **3V3** (not 5V). If your module has no CS pin, leave ESP `D5` unused and set `PIN_TFT_CS` to `-1` in `include/board_pins_esp32dev.h`. On classic ESP32, do **not** use GPIO 25–27 for DC/RST — those are ADC2 and conflict with Wi‑Fi (display can freeze after HTTP).
 
@@ -40,8 +40,8 @@ LCD panel **SDA/SCL are SPI** (MOSI/SCLK), not the BME280 I2C pins. VCC must be 
 | ------ | ------------- | --------------- |
 | VCC    | 3V3           | 3V3             |
 | GND    | GND           | GND             |
-| SDA    | 33 (D2)       | 21 (D21)        |
-| SCL    | 35 (D1)       | 19 (D19)        |
+| SDA    | 33 (D2)       | 23 (D23)        |
+| SCL    | 35 (D1)       | 22 (D22)        |
 
 Six-pin modules also have **CSB** / **SDO** (sometimes silk **CSR** / **SDK**). Leave them at **board default** (usually unconnected). Do not wire those two to ESP GPIOs.
 
@@ -51,8 +51,8 @@ Six-pin modules also have **CSB** / **SDO** (sometimes silk **CSR** / **SDK**). 
 | -------- | ---------------- | ----------------- |
 | VCC      | 3V3              | 3V3               |
 | GND      | GND              | GND               |
-| SDA      | 33 (D2) — shared | 21 (D21) — shared |
-| SCL      | 35 (D1) — shared | 19 (D19) — shared |
+| SDA      | 33 (D2) — shared | 23 (D23) — shared |
+| SCL      | 35 (D1) — shared | 22 (D22) — shared |
 
 Share the climate I2C bus on both boards (VEML `0x10` does not collide with BMx/AHT).
 
@@ -71,14 +71,14 @@ Reference unit prices for one build (esp32dev setup).
 | Part            | Spec                     |  Price (₩) |
 | --------------- | ------------------------ | ---------: |
 | ESP32           | DevKit                   |      7,200 |
-| LCD             | 1.54" ST7789 240×240     |      3,500 |
+| LCD             | 2.4" ST7789 240×320      |      5,600 |
 | Temp / humidity | BME280 or BMP280 + AHT20 |      1,750 |
 | Ambient light   | VEML7700                 |      2,250 |
 | Case            | Enclosure                |      3,500 |
 | Battery         | 1000 mAh                 |      4,300 |
 | Power           | TP4056 + DC-DC 5V        |        900 |
 | Touch           | TTP223                   |        400 |
-| **Total**       |                          | **23,800** |
+| **Total**       |                          | **25,900** |
 
 ## Features
 
@@ -87,7 +87,7 @@ Reference unit prices for one build (esp32dev setup).
 - PlatformIO project for **S2 Mini** and **ESP32 DevKit** (board chosen at build time)
 - App firmware is the default (LVGL clock UI); optional `checkup` mode for LED + LCD + serial smoke test
 - Board check: onboard LED blink, LCD color cycle, serial heartbeat
-- Clock UI on the 1.54" LCD (SquareLine / LVGL)
+- Clock UI on the 2.4" LCD (SquareLine / LVGL)
 - TTP223 touch toggles home ↔ climate chart (daily/monthly)
 - Wi‑Fi provisioning via local HTTP portal (SoftAP + STA)
 - NTP time sync in **KST (UTC+9)** → live `ui_time` / `ui_date`
