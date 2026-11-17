@@ -29,7 +29,7 @@
 static const uint16_t kScreenW = 240;
 static const uint16_t kScreenH = 320;
 static const uint32_t kNtpWaitMs = 15000;
-static const uint32_t kBootConfigMs = 10UL * 60UL * 1000UL; // portal window
+static const uint32_t kBootConfigMs = 2UL * 60UL * 1000UL; // portal window
 static const uint32_t kDailySyncMs = 24UL * 60UL * 60UL * 1000UL;
 static const uint32_t kClimateUiMs = 5000; // refresh ui_temp / ui_humid
 static const uint32_t kLuxBlMs = 3000; // scan frequency for ambient sensor (VEML7700)
@@ -1035,11 +1035,6 @@ static void formatPriceWithCommas(float price, char *out, size_t outLen) {
     out[used < outLen ? used : outLen - 1] = '\0';
 }
 
-static bool marketBannerVisible(void) {
-  return onHomeScreen && marketConfigIsVisible() && ui_market &&
-         !lv_obj_has_flag(ui_market, LV_OBJ_FLAG_HIDDEN);
-}
-
 static void applyMarketVisibility() {
   if (!ui_market)
     return;
@@ -1058,7 +1053,8 @@ static void updateMarketUi() {
     return;
 
   lv_label_set_recolor(ui_market, true);
-  lv_label_set_long_mode(ui_market, LV_LABEL_LONG_SCROLL_CIRCULAR);
+  // Static clip (no circular scroll) so home can light-sleep / idle at 40 MHz.
+  lv_label_set_long_mode(ui_market, LV_LABEL_LONG_CLIP);
 
   if (!marketFetchHasData() || marketFetchCount() == 0) {
     lv_label_set_text(ui_market, "KS --  KQ --");
@@ -1278,11 +1274,8 @@ static void homeUiPump() {
     struct tm localTm;
     if (timeSyncTick(&localTm)) {
       paintTime(localTm);
-      // Full flush stalls SPI with the marquee strip; skip while banner is on.
-      if (!marketBannerVisible()) {
-        lv_timer_handler();
-        lv_refr_now(NULL);
-      }
+      lv_timer_handler();
+      lv_refr_now(NULL);
     } else {
       blinkColon(); // mid-second OFF; lvglPump flushes below
     }
@@ -1315,6 +1308,7 @@ static void showHome() {
 }
 
 // TTP223 active-high: rising edge cycles home → climate → moisture → home.
+// First tap while ambient-blanked only wakes the backlight.
 static void pollTouchNav(void) {
   const bool rawHigh = digitalRead(PIN_TOUCH_OUT) == HIGH;
   const uint32_t now = millis();
@@ -1332,6 +1326,8 @@ static void pollTouchNav(void) {
   touchStableHigh = rawHigh;
   if (wasHigh || !rawHigh)
     return; // only rising edge
+  if (blCtrlWakeFromBlank())
+    return;
   if (onHomeScreen)
     showChart();
   else if (onChartScreen)
@@ -1362,7 +1358,7 @@ static void closeBootConfigWindow() {
   bootConfigOpen = false;
   wifiConfigRadioOff();
   updateWifiIcon();
-  Serial.println("Boot config window closed (10 min)");
+  Serial.println("Boot config window closed (2 min)");
 }
 
 enum class NtpPhase : uint8_t { Idle, Waking, Waiting };
@@ -1373,14 +1369,10 @@ static time_t ntpEpochBefore = 0;
 static bool ntpHadTime = false;
 
 static bool canIdleLightSleep(void) {
-  // Market circular scroll needs frequent LVGL pumps — never deep-idle then.
-  // Chart screen is static → idle OK when radio is off.
-  const bool marketScrollBlocks =
-      onHomeScreen && marketConfigIsVisible();
+  // Market is static (CLIP) — does not block idle. Chart screens are static.
   return (onHomeScreen || onChartScreen || onMoistureChartScreen) &&
          !bootConfigOpen && !wifiConfigIsRadioOn() && wifiConfigCmdIdle() &&
-         !marketFetchBusy() && ntpPhase == NtpPhase::Idle &&
-         !marketScrollBlocks;
+         !marketFetchBusy() && ntpPhase == NtpPhase::Idle;
 }
 
 static void serviceDailyNtp() {
@@ -1515,7 +1507,7 @@ void clockAppSetup() {
   bootConfigUntilMs = millis() + kBootConfigMs;
   nextNtpSyncMs = millis() + kDailySyncMs;
   if (bootConfigOpen)
-    Serial.println("Boot config window: 10 min (then WiFi off)");
+    Serial.println("Boot config window: 2 min (then WiFi off)");
 
   bmeSensorBegin();
   lightSensorBegin();
@@ -1541,7 +1533,7 @@ void clockAppSetup() {
       loadingPump();
     }
   }
-  // Boot history so chart is not empty until the first 10 min wake.
+  // Boot history so chart is not empty until the first 30 min wake.
   if (wifiConfigIsConnected()) {
     showLoading("Fetching history...");
     setLoadingProgress(90, true);
@@ -1569,11 +1561,10 @@ void clockAppLoop() {
   pollTouchNav();
 
   const bool radioOn = wifiConfigIsRadioOn();
-  const bool marketScroll = marketBannerVisible();
-  // 240 MHz only while Wi‑Fi is up; idle / market scroll run at 80 MHz.
+  // 240 MHz only while Wi‑Fi is up; radio-off idle runs at 40 MHz.
   powerSetRadioActive(radioOn);
   powerSetUiBoost(false);
-  const bool needFastLvgl = bootConfigOpen || radioOn || marketScroll;
+  const bool needFastLvgl = bootConfigOpen || radioOn;
 
   // Keep UI alive first — WiFi/HTTP/I2C must not starve the clock.
   if (onHomeScreen) {
@@ -1581,13 +1572,9 @@ void clockAppLoop() {
     if (timeSyncTick(&localTm)) {
       paintTime(localTm);
       didTimeTick = true;
-      // Never lv_refr_now while the market is scrolling — it force-flushes
-      // the whole dirty marquee and freezes banner + seconds together.
-      // With market off, a one-shot flush keeps digits from fading.
-      if (!marketScroll) {
-        lv_timer_handler();
-        lv_refr_now(NULL);
-      }
+      // One-shot flush keeps digits from fading between idle slices.
+      lv_timer_handler();
+      lv_refr_now(NULL);
     } else if (blinkColon()) {
       // Mid-second OFF (~0.5 s) — flush without waiting for next SS tick.
       uiDirty = true;
@@ -1667,7 +1654,7 @@ void clockAppLoop() {
   if (canIdleLightSleep()) {
     if (!idleSleepActive) {
       idleSleepActive = true;
-      Serial.println("Power: idle (CPU 80 MHz, poll ≤100 ms)");
+      Serial.println("Power: idle (CPU 40 MHz, poll ≤100 ms)");
     }
     // Short slices so HH/MM/SS keep ticking; long delay(1s) looked frozen.
     uint64_t sleepUs = powerUsUntilNextSecond();
@@ -1688,7 +1675,14 @@ void clockAppLoop() {
     clampWakeMs(nextLuxBlMs);
     clampWakeMs(nextNtpSyncMs);
 
-    if (!blCtrlAutoEnabled() && blCtrlWantOn()) {
+    // Light sleep when BL is off/blanked (LEDC idle), or auto-off with BL held
+    // digital HIGH. Auto-dim PWM must stay awake — LEDC stops in light sleep.
+    const bool blOff = !blCtrlWantOn() || blCtrlIsBlanked() || blCtrlDuty() == 0;
+    if (blOff) {
+      esp_sleep_enable_timer_wakeup(sleepUs);
+      esp_light_sleep_start();
+      blCtrlReapplyAfterSleep();
+    } else if (!blCtrlAutoEnabled() && blCtrlWantOn()) {
       pinMode(PIN_TFT_BL, OUTPUT);
       digitalWrite(PIN_TFT_BL, HIGH);
       esp_sleep_enable_timer_wakeup(sleepUs);
@@ -1702,7 +1696,7 @@ void clockAppLoop() {
       idleSleepActive = false;
       Serial.println("Power: leave idle");
     }
-    // Market marquee / portal: ~5 ms LVGL cadence.
+    // Portal / radio: ~5 ms LVGL cadence.
     delay(needFastLvgl ? 5 : 30);
   }
 }

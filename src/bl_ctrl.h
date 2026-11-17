@@ -32,6 +32,12 @@ void blCtrlSetAutoEnabled(bool enabled);
 // True when backlight is requested on (PWM or full).
 bool blCtrlWantOn(void);
 
+// True when auto-BL blanked the panel after sustained dark (duty 0).
+bool blCtrlIsBlanked(void);
+
+// Clear ambient blank and restore duty. Returns true if it was blanked.
+bool blCtrlWakeFromBlank(void);
+
 // After CPU light sleep: re-attach LEDC and restore last duty.
 void blCtrlReapplyAfterSleep(void);
 

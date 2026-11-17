@@ -13,12 +13,13 @@ static const int kBlPwmMax = (1 << kBlPwmBits) - 1; // 255
 
 // Lux→BL for indoor room (day <1000, night <200): steeper log + hard cap.
 // Auto-off (portal) still forces full kBlPwmMax. Snap EMA on big jumps.
-static const int kBlDutyMin = 26;        // ~10% floor (night)
-static const int kBlDutyCap = 178;       // ~70% peak while auto-on
-static const float kLuxDark = 20.0f;     // at/below → min duty
+static const int kBlDutyMin = 13;        // ~5% floor (night)
+static const int kBlDutyCap = 90;        // ~35% peak while auto-on
+static const float kLuxDark = 20.0f;     // at/below → min duty / blank timer
 static const float kLuxBright = 2000.0f; // at/above → cap
 static const float kLuxEmaAlpha = 0.55f;
 static const float kLuxSnapRatio = 2.5f; // |lux/ema| beyond this → snap
+static const uint32_t kDarkBlankMs = 60UL * 1000UL; // blank after sustained dark
 
 static const char *kPrefsUiNs = "clockui";
 static const char *kKeyBlAuto = "bl_auto";
@@ -34,6 +35,8 @@ static bool pwmReady = false;
 static bool wantOn = false;
 static bool autoEnabled = true;
 static bool prefsLoaded = false;
+static bool ambientBlanked = false;
+static uint32_t darkSinceMs = 0;
 static float luxEma = NAN;
 static float luxRaw = NAN;
 static int dutyCurrent = kBlPwmMax;
@@ -64,12 +67,18 @@ static int luxToDuty(float lux) {
   return kBlDutyMin + (int)lroundf(tc * (float)(kBlDutyCap - kBlDutyMin));
 }
 
+static void clearAmbientBlank(void) {
+  ambientBlanked = false;
+  darkSinceMs = 0;
+}
+
 static void applyBrightness(void) {
   if (!wantOn) {
     writeDuty(0);
     return;
   }
   if (!autoEnabled) {
+    clearAmbientBlank();
     writeDuty(kBlPwmMax);
     return;
   }
@@ -88,9 +97,31 @@ static void applyBrightness(void) {
       else
         luxEma = kLuxEmaAlpha * lux + (1.0f - kLuxEmaAlpha) * luxEma;
     }
+
+    // Sustained dark → blank (duty 0); lux above dark clears blank.
+    if (luxEma <= kLuxDark) {
+      const uint32_t now = millis();
+      if (darkSinceMs == 0)
+        darkSinceMs = now;
+      else if (!ambientBlanked &&
+               (uint32_t)(now - darkSinceMs) >= kDarkBlankMs) {
+        ambientBlanked = true;
+        Serial.println("BL ambient blank (dark ≥60s)");
+      }
+    } else {
+      if (ambientBlanked)
+        Serial.println("BL ambient wake (lux)");
+      clearAmbientBlank();
+    }
+
+    if (ambientBlanked) {
+      writeDuty(0);
+      return;
+    }
     writeDuty(luxToDuty(luxEma));
   } else {
     luxRaw = NAN;
+    clearAmbientBlank();
     writeDuty(kBlDutyCap); // auto-on, no sensor → indoor peak, not full
   }
 }
@@ -130,6 +161,8 @@ void blCtrlUpdateFromLux(void) {
 void blCtrlSetOn(bool on) {
   blCtrlBegin();
   wantOn = on;
+  if (!on)
+    clearAmbientBlank();
   applyBrightness();
 }
 
@@ -154,6 +187,8 @@ void blCtrlSetAutoEnabled(bool enabled) {
     prefs.putBool(kKeyBlAuto, autoEnabled);
     prefs.end();
   }
+  if (!enabled)
+    clearAmbientBlank();
   if (wantOn)
     applyBrightness();
   Serial.printf("BL auto brightness %s\n", autoEnabled ? "ON" : "OFF");
@@ -161,11 +196,24 @@ void blCtrlSetAutoEnabled(bool enabled) {
 
 bool blCtrlWantOn(void) { return wantOn; }
 
+bool blCtrlIsBlanked(void) { return ambientBlanked; }
+
+bool blCtrlWakeFromBlank(void) {
+  if (!ambientBlanked)
+    return false;
+  ambientBlanked = false;
+  darkSinceMs = 0;
+  Serial.println("BL ambient wake (touch)");
+  if (wantOn)
+    applyBrightness();
+  return true;
+}
+
 void blCtrlReapplyAfterSleep(void) {
   // Light sleep gates the LEDC peripheral — re-attach and restore duty.
   pwmReady = false;
   blCtrlBegin();
-  if (!wantOn) {
+  if (!wantOn || ambientBlanked) {
     writeDuty(0);
     return;
   }

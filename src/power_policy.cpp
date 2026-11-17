@@ -8,7 +8,7 @@ static bool uiBoost = false;
 static int appliedMhz = 0;
 
 static void applyCpu(void) {
-  const int mhz = (radioActive || uiBoost) ? 240 : 80;
+  const int mhz = (radioActive || uiBoost) ? 240 : 40;
   if (mhz == appliedMhz)
     return;
   appliedMhz = mhz;

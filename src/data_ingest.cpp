@@ -22,7 +22,7 @@
 #error "Build app with INGEST_ENV_LOCAL or INGEST_ENV_PROD"
 #endif
 
-static const uint32_t INTERVAL_MS = 10UL * 60UL * 1000UL; // 10min
+static const uint32_t INTERVAL_MS = 30UL * 60UL * 1000UL; // 30min
 static const uint32_t RETRY_MS = 60UL * 1000UL;           // 60s
 
 static uint32_t nextPostMs = 0;
@@ -34,7 +34,7 @@ static bool postSensorOk = false;
 static float postTempC = 0;
 static float postHumidity = 0;
 static bool postAllowRadioOff = false;
-// After a failed read/post, one 30s retry then back to 10 min.
+// After a failed read/post, one retry then back to 30 min.
 static bool awaitingQuickRetry = false;
 
 static String iso8601UtcNow() {
@@ -99,9 +99,9 @@ void dataIngestBegin() {
   nextPostMs = millis() + 15000;
   awaitingQuickRetry = false;
 #if defined(INGEST_ENV_LOCAL)
-  Serial.println("data ingest LOCAL: every 10 min (WiFi wake → POST → off)");
+  Serial.println("data ingest LOCAL: every 30 min (WiFi wake → POST → off)");
 #else
-  Serial.println("data ingest PROD: every 10 min (WiFi wake → POST → off)");
+  Serial.println("data ingest PROD: every 30 min (WiFi wake → POST → off)");
 #endif
 }
 
@@ -119,7 +119,7 @@ static void ingestNetTask(void * /*arg*/) {
       Serial.printf("data ingest ok  T=%.2f RH=%.1f\n", t, h);
   } else if (postOk && !sensorOk) {
     scheduleNext(true);
-    Serial.println("data ingest ok (sensor null); one 30s retry then 10 min");
+    Serial.println("data ingest ok (sensor null); one 30s retry then 30 min");
   } else {
     scheduleNext(true);
     if (!sensorOk)
@@ -157,7 +157,7 @@ void dataIngestLoop(bool allowRadioOff) {
       return;
     ingestWaking = false;
     if (!wifiConfigIsConnected()) {
-      Serial.println("data ingest: WiFi wake failed; retry once or wait 10 min");
+      Serial.println("data ingest: WiFi wake failed; retry once or wait 30 min");
       scheduleNext(true);
       return;
     }

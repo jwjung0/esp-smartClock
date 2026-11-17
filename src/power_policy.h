@@ -7,10 +7,10 @@
 extern "C" {
 #endif
 
-// Scale CPU for Wi‑Fi: on → 240 MHz, off → 80 MHz.
+// Scale CPU for Wi‑Fi: on → 240 MHz, off → 40 MHz idle.
 void powerSetRadioActive(bool radioOn);
 
-// Optional UI boost to 240 MHz (normally left off — market runs at 80).
+// Optional UI boost to 240 MHz (normally left off — market runs at idle MHz).
 void powerSetUiBoost(bool boost);
 
 bool powerRadioActive(void);

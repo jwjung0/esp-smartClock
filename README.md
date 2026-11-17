@@ -71,7 +71,7 @@ Reference unit prices for one build (esp32dev setup).
 | Part            | Spec                     |  Price (₩) |
 | --------------- | ------------------------ | ---------: |
 | ESP32           | DevKit                   |      7,200 |
-| LCD             | 2.4" ST7789 240×320      |      5,600 |
+| LCD             | 2.4" ST7789V 240×320     |      5,600 |
 | Temp / humidity | BME280 or BMP280 + AHT20 |      1,750 |
 | Ambient light   | VEML7700                 |      2,250 |
 | Case            | Enclosure                |      3,500 |
@@ -91,10 +91,10 @@ Reference unit prices for one build (esp32dev setup).
 - TTP223 touch toggles home ↔ climate chart (daily/monthly)
 - Wi‑Fi provisioning via local HTTP portal (SoftAP + STA)
 - NTP time sync in **KST (UTC+9)** → live `ui_time` / `ui_date`
-- Power policy: **10 min** config window after boot, then Wi‑Fi off; **daily** NTP resync; **every 10 min** climate data ingest (brief Wi‑Fi wake → POST → Naver weather + OpenWeather GET → Naver market GET → off). With radio off: CPU **80 MHz**, home loop idles until the next **1 Hz** colon/time tick (light sleep when auto-BL is off; timed wait when auto-BL PWM must stay running). Radio on → CPU **240 MHz**. Indoor auto-BL curve caps ~**70%** duty.
+- Power policy: **2 min** config window after boot, then Wi‑Fi off; **daily** NTP resync; **every 30 min** climate data ingest (brief Wi‑Fi wake → POST → Naver weather + OpenWeather GET → Naver market GET → off). With radio off: CPU **40 MHz**, home loop idles until the next **1 Hz** colon/time tick (light sleep when BL is off/blanked or auto-BL is off; timed wait when auto-BL PWM must stay running). Radio on → CPU **240 MHz**. Indoor auto-BL curve caps ~**35%** duty (~5% night floor); sustained dark ≥**60 s** blanks the panel (TTP223 or lux rise wakes).
 - Climate ingest deploy targets: **local** (this Mac) vs **prod** (Ubuntu) via gitignored `include/ingest_config_*.h`
 - Live indoor T/RH from BME280 on `ui_temp*` / `ui_humid`
-- Ambient lux from VEML7700 → auto LCD backlight brightness (PWM; no ingest). Indoor log curve (~10% night floor, ~70% day cap). Config portal **Backlight** switch turns auto on/off (off = full brightness; stored in NVS `clockui` / `bl_auto`). **Weather** source stored in NVS `clockui` / `wx_src` (`naver` | `openweather`)
+- Ambient lux from VEML7700 → auto LCD backlight brightness (PWM; no ingest). Indoor log curve (~5% night floor, ~35% day cap) + dark blank. Config portal **Backlight** switch turns auto on/off (off = full brightness; stored in NVS `clockui` / `bl_auto`). **Weather** source stored in NVS `clockui` / `wx_src` (`naver` | `openweather`)
 - Outdoor weather → `ui_current_temp`, `ui_current_humid`, image `ui_weather`: config portal **Weather** source (default **Naver**; optional **OpenWeather**). The other provider is used if the selected one fails. OpenWeather needs a free-tier 2.5 key (One Call 3.0/4.0 need a paid plan)
 - Market ticker → scrolling Label `ui_market`: defaults **KS** / **KQ** / **Nasdaq** / **USD**, plus optional custom tickers from the config portal. **KS/KQ/USD** (+ custom) from **Naver Finance**; **Nasdaq** from **Yahoo** (`^IXIC`). Up = red, down = blue, flat = white
 
@@ -110,9 +110,9 @@ Reference unit prices for one build (esp32dev setup).
 
 **SquareLine market ticker**
 
-- Widget: Label `ui_market` (fixed width ~220–240 px, long mode **Scroll circular**, recolor on)
+- Widget: Label `ui_market` (fixed width ~220–240 px, long mode **Clip** / static, recolor on)
 - Firmware overwrites text with colored segments, e.g. `KS 5730.74 -3.48%  KQ 724.38 -3.83%  Nasdaq 25437.00 -2.86%  USD 1335.80 -0.35%`
-- Refreshes on boot (if STA up) and on the same ~10 min climate wake as weather
+- Refreshes on boot (if STA up) and on the same ~30 min climate wake as weather
 - **Config portal → Stock Market**: switch hides/shows the home scrollbar immediately; toggle default KS/KQ/Nasdaq/USD; add custom rows with English **Name** + Naver **Code** (e.g. `Samsung` / `005930`). Max 4 custom, 8 quotes total. Stored in NVS namespace `market`. Custom marquee uses the Name you enter (`Samsung 220,500 -5.17%`). Code kinds: 6-digit stock, `KOSPI`/`KOSDAQ`/`KPI200`, world index (`.IXIC`), FX (`FX_USDKRW`)
 
 **Checkup**
@@ -130,9 +130,9 @@ Reference unit prices for one build (esp32dev setup).
 4. Pick a network from the scan list (or type SSID), enter the password, tap **Connect**.
 5. After join, open **http://smartclock.local/** on the same Wi‑Fi (mDNS). Fallback: LAN IP from Serial.
 6. SoftAP setup stays **http://192.168.4.1/**.
-7. Portal stays up for **10 minutes after boot**, then Wi‑Fi turns off. Power-cycle for another config window.
+7. Portal stays up for **2 minutes after boot**, then Wi‑Fi turns off. Power-cycle for another config window.
 8. NTP resyncs about **once per day** (brief Wi‑Fi wake, then off again). Time zone: **KST**.
-9. After the config window, climate readings POST about **every 10 minutes** (Wi‑Fi on → POST → Naver weather + OpenWeather GET → Naver market GET → off). Set URL/token in gitignored `include/ingest_config_local.h` / `include/ingest_config_prod.h`.
+9. After the config window, climate readings POST about **every 30 minutes** (Wi‑Fi on → POST → Naver weather + OpenWeather GET → Naver market GET → off). Set URL/token in gitignored `include/ingest_config_local.h` / `include/ingest_config_prod.h`.
 10. Same wake fetches outdoor weather (Naver KMA preferred, OpenWeather fallback) and market quotes (Naver). Set keys/region in gitignored `include/weather_config.h`.
 
 Credentials are stored in NVS (`Preferences` namespace `wifi`). UI colors + backlight auto use `clockui`; market defaults/customs use `market`.
@@ -192,7 +192,7 @@ include/weather_config.h    # OpenWeather key/lat/lon + Naver region code (gitig
 src/main.cpp                # setup/loop — switches on FIRMWARE_MODE_*
 src/board_check.h/.cpp      # LED + serial smoke test
 src/clock_app.h/.cpp        # LVGL clock app
-src/data_ingest.h/.cpp      # BME280 → HTTP climate ingest (10 min wake)
+src/data_ingest.h/.cpp      # BME280 → HTTP climate ingest (30 min wake)
 src/weather_fetch.h/.cpp    # Naver KMA + OpenWeather 2.5 (HTTPS; Naver preferred)
 src/market_fetch.h/.cpp     # Naver Finance KS/KQ/Nasdaq/USD ticker (HTTPS)
 src/wifi_config.h/.cpp      # SoftAP/STA portal, NVS credentials
