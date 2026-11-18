@@ -14,7 +14,7 @@ static const int kBlPwmMax = (1 << kBlPwmBits) - 1; // 255
 // Lux→BL for indoor room (day <1000, night <200): steeper log + hard cap.
 // Auto-off (portal) still forces full kBlPwmMax. Snap EMA on big jumps.
 static const int kBlDutyMin = 26;        // ~10% floor (night)
-static const int kBlDutyCap = 153;       // ~60% peak while auto-on
+static const int kBlDutyCap = 180;       // ~70% peak while auto-on
 static const float kLuxDark = 20.0f;     // at/below → min duty
 static const float kLuxBright = 2000.0f; // at/above → cap
 static const float kLuxEmaAlpha = 0.55f;
