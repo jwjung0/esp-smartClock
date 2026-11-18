@@ -33,6 +33,7 @@ static const uint32_t kBootConfigMs = 2UL * 60UL * 1000UL; // portal window
 static const uint32_t kDailySyncMs = 24UL * 60UL * 60UL * 1000UL;
 static const uint32_t kClimateUiMs = 5000; // refresh ui_temp / ui_humid
 static const uint32_t kLuxBlMs = 3000; // scan frequency for ambient sensor (VEML7700)
+static const uint32_t kMarketPageMs = 2000; // one stock quote at a time
 static const uint32_t kProgressAnimMs = 500;
 static const uint32_t kCreepIntervalMs = 60;
 static const uint32_t kTouchDebounceMs = 50;
@@ -65,6 +66,8 @@ static uint32_t bootConfigUntilMs = 0;
 static uint32_t nextNtpSyncMs = 0;
 static uint32_t nextClimateUiMs = 0;
 static uint32_t nextLuxBlMs = 0;
+static uint32_t nextMarketPageMs = 0;
+static size_t marketPageIndex = 0;
 static bool bootConfigOpen = false;
 static int loadingCreepCeiling = 0;
 static uint32_t lastCreepMs = 0;
@@ -1036,62 +1039,96 @@ static void formatPriceWithCommas(float price, char *out, size_t outLen) {
 }
 
 static void applyMarketVisibility() {
-  if (!ui_market)
+  const bool show = marketConfigIsVisible();
+  if (ui_stock_index) {
+    if (show)
+      lv_obj_clear_flag(ui_stock_index, LV_OBJ_FLAG_HIDDEN);
+    else
+      lv_obj_add_flag(ui_stock_index, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (ui_icon_stock) {
+    if (show)
+      lv_obj_clear_flag(ui_icon_stock, LV_OBJ_FLAG_HIDDEN);
+    else
+      lv_obj_add_flag(ui_icon_stock, LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
+// Next valid quote index after `from` (wrap). Returns false if none valid.
+static bool marketNextValidIndex(size_t from, size_t *outIndex) {
+  const size_t n = marketFetchCount();
+  if (!outIndex || n == 0)
+    return false;
+  for (size_t step = 0; step < n; ++step) {
+    const size_t i = (from + step) % n;
+    MarketQuote q;
+    if (marketFetchGetAt(i, &q) && q.valid) {
+      *outIndex = i;
+      return true;
+    }
+  }
+  return false;
+}
+
+static void paintMarketPage(void) {
+  if (!ui_stock_index)
     return;
-  if (marketConfigIsVisible())
-    lv_obj_clear_flag(ui_market, LV_OBJ_FLAG_HIDDEN);
-  else
-    lv_obj_add_flag(ui_market, LV_OBJ_FLAG_HIDDEN);
+
+  lv_label_set_recolor(ui_stock_index, true);
+
+  if (!marketFetchHasData() || marketFetchCount() == 0) {
+    lv_label_set_text(ui_stock_index, "KS --");
+    return;
+  }
+
+  size_t idx = marketPageIndex;
+  MarketQuote q;
+  if (!marketFetchGetAt(idx, &q) || !q.valid) {
+    if (!marketNextValidIndex(0, &idx)) {
+      lv_label_set_text(ui_stock_index, "KS --");
+      return;
+    }
+    marketPageIndex = idx;
+    if (!marketFetchGetAt(idx, &q) || !q.valid) {
+      lv_label_set_text(ui_stock_index, "KS --");
+      return;
+    }
+  }
+
+  char priceBuf[24];
+  formatPriceWithCommas(q.price, priceBuf, sizeof(priceBuf));
+  char line[96];
+  snprintf(line, sizeof(line), "#%06X %s %s %+0.2f%%#",
+           (unsigned)marketColorForPct(q.pct), q.tag, priceBuf, (double)q.pct);
+  lv_label_set_text(ui_stock_index, line);
 }
 
 static void updateMarketUi() {
-  if (!ui_market)
-    return;
-
   applyMarketVisibility();
   if (!marketConfigIsVisible())
     return;
+  paintMarketPage();
+}
 
-  lv_label_set_recolor(ui_market, true);
-  // Static clip (no circular scroll) so home can light-sleep / idle at 40 MHz.
-  lv_label_set_long_mode(ui_market, LV_LABEL_LONG_CLIP);
-
-  if (!marketFetchHasData() || marketFetchCount() == 0) {
-    lv_label_set_text(ui_market, "KS --  KQ --");
+static void serviceMarketPageRotate(bool *uiDirty) {
+  if (!onHomeScreen || !marketConfigIsVisible())
     return;
-  }
+  if ((int32_t)(millis() - nextMarketPageMs) < 0)
+    return;
 
-  char line[288];
-  size_t used = 0;
-  line[0] = '\0';
+  nextMarketPageMs = millis() + kMarketPageMs;
+  if (!marketFetchHasData() || marketFetchCount() == 0)
+    return;
 
-  for (size_t i = 0; i < marketFetchCount(); ++i) {
-    MarketQuote q;
-    if (!marketFetchGetAt(i, &q) || !q.valid)
-      continue;
-
-    const uint32_t color = marketColorForPct(q.pct);
-    char priceBuf[24];
-    formatPriceWithCommas(q.price, priceBuf, sizeof(priceBuf));
-
-    char seg[80];
-    const int n =
-        snprintf(seg, sizeof(seg), "%s#%06X %s %s %+0.2f%%#",
-                 used > 0 ? "  " : "", (unsigned)color, q.tag, priceBuf,
-                 (double)q.pct);
-    if (n <= 0 || (size_t)n >= sizeof(seg))
-      continue;
-    if (used + (size_t)n + 1 > sizeof(line))
-      break;
-    memcpy(line + used, seg, (size_t)n);
-    used += (size_t)n;
-    line[used] = '\0';
-  }
-
-  if (used == 0)
-    lv_label_set_text(ui_market, "KS --  KQ --");
-  else
-    lv_label_set_text(ui_market, line);
+  size_t next = 0;
+  if (!marketNextValidIndex(marketPageIndex + 1, &next))
+    return;
+  if (next == marketPageIndex)
+    return; // only one valid quote
+  marketPageIndex = next;
+  paintMarketPage();
+  if (uiDirty)
+    *uiDirty = true;
 }
 
 static const uint32_t kArcDim = 0x555555;
@@ -1308,7 +1345,6 @@ static void showHome() {
 }
 
 // TTP223 active-high: rising edge cycles home → climate → moisture → home.
-// First tap while ambient-blanked only wakes the backlight.
 static void pollTouchNav(void) {
   const bool rawHigh = digitalRead(PIN_TOUCH_OUT) == HIGH;
   const uint32_t now = millis();
@@ -1326,8 +1362,6 @@ static void pollTouchNav(void) {
   touchStableHigh = rawHigh;
   if (wasHigh || !rawHigh)
     return; // only rising edge
-  if (blCtrlWakeFromBlank())
-    return;
   if (onHomeScreen)
     showChart();
   else if (onChartScreen)
@@ -1512,6 +1546,8 @@ void clockAppSetup() {
   bmeSensorBegin();
   lightSensorBegin();
   nextLuxBlMs = millis() + kLuxBlMs;
+  nextMarketPageMs = millis() + kMarketPageMs;
+  marketPageIndex = 0;
   // Apply lux-based duty once sensor is up (BL already on from loading).
   blCtrlUpdateFromLux();
   weatherFetchBegin();
@@ -1591,6 +1627,7 @@ void clockAppLoop() {
         uiDirty = true;
       }
     }
+    serviceMarketPageRotate(&uiDirty);
   }
 
   // Auto-BL on home or chart (debug chart-only still needs lux).
@@ -1606,8 +1643,11 @@ void clockAppLoop() {
   }
   if (marketConfigTakeVisibilityChanged()) {
     applyMarketVisibility();
-    if (marketConfigIsVisible())
+    if (marketConfigIsVisible()) {
+      marketPageIndex = 0;
+      nextMarketPageMs = millis() + kMarketPageMs;
       updateMarketUi();
+    }
     uiDirty = true;
   }
 
@@ -1634,6 +1674,8 @@ void clockAppLoop() {
     lv_timer_handler();
   }
   if (onHomeScreen && marketFetchTakeUpdated()) {
+    marketPageIndex = 0;
+    nextMarketPageMs = millis() + kMarketPageMs;
     updateMarketUi();
     lv_timer_handler();
   }
@@ -1674,10 +1716,12 @@ void clockAppLoop() {
     clampWakeMs(nextClimateUiMs);
     clampWakeMs(nextLuxBlMs);
     clampWakeMs(nextNtpSyncMs);
+    if (onHomeScreen && marketConfigIsVisible())
+      clampWakeMs(nextMarketPageMs);
 
-    // Light sleep when BL is off/blanked (LEDC idle), or auto-off with BL held
+    // Light sleep when BL is off (LEDC idle), or auto-off with BL held
     // digital HIGH. Auto-dim PWM must stay awake — LEDC stops in light sleep.
-    const bool blOff = !blCtrlWantOn() || blCtrlIsBlanked() || blCtrlDuty() == 0;
+    const bool blOff = !blCtrlWantOn() || blCtrlDuty() == 0;
     if (blOff) {
       esp_sleep_enable_timer_wakeup(sleepUs);
       esp_light_sleep_start();

@@ -5,7 +5,7 @@
 
 #include "../ui.h"
 
-lv_obj_t *ui_home = NULL;lv_obj_t *ui_temp = NULL;lv_obj_t *ui_humid = NULL;lv_obj_t *ui_hh1 = NULL;lv_obj_t *ui_mm1 = NULL;lv_obj_t *ui_ss1 = NULL;lv_obj_t *ui_current_temp = NULL;lv_obj_t *ui_current_humid = NULL;lv_obj_t *ui_wkday = NULL;lv_obj_t *ui_date = NULL;lv_obj_t *ui_wifi = NULL;lv_obj_t *ui_weather = NULL;lv_obj_t *ui_box1 = NULL;lv_obj_t *ui_current_celcus = NULL;lv_obj_t *ui_current_pct = NULL;lv_obj_t *ui_icon_humid = NULL;lv_obj_t *ui_icon_temp = NULL;lv_obj_t *ui_market = NULL;lv_obj_t *ui_arc_temp = NULL;lv_obj_t *ui_arc_humid = NULL;lv_obj_t *ui_celcus = NULL;lv_obj_t *ui_pct = NULL;lv_obj_t *ui_temp_sub = NULL;lv_obj_t *ui_temp_hi = NULL;lv_obj_t *ui_temp_lo = NULL;lv_obj_t *ui_temp_fcst = NULL;lv_obj_t *ui_banner = NULL;lv_obj_t *ui_moisture_label = NULL;lv_obj_t *ui_moisture = NULL;
+lv_obj_t *ui_home = NULL;lv_obj_t *ui_temp = NULL;lv_obj_t *ui_humid = NULL;lv_obj_t *ui_hh1 = NULL;lv_obj_t *ui_mm1 = NULL;lv_obj_t *ui_ss1 = NULL;lv_obj_t *ui_current_temp = NULL;lv_obj_t *ui_current_humid = NULL;lv_obj_t *ui_wkday = NULL;lv_obj_t *ui_date = NULL;lv_obj_t *ui_wifi = NULL;lv_obj_t *ui_weather = NULL;lv_obj_t *ui_box1 = NULL;lv_obj_t *ui_current_celcus = NULL;lv_obj_t *ui_current_pct = NULL;lv_obj_t *ui_icon_humid = NULL;lv_obj_t *ui_icon_temp = NULL;lv_obj_t *ui_arc_temp = NULL;lv_obj_t *ui_arc_humid = NULL;lv_obj_t *ui_celcus = NULL;lv_obj_t *ui_pct = NULL;lv_obj_t *ui_temp_sub = NULL;lv_obj_t *ui_temp_hi = NULL;lv_obj_t *ui_temp_lo = NULL;lv_obj_t *ui_temp_fcst = NULL;lv_obj_t *ui_banner = NULL;lv_obj_t *ui_moisture_label = NULL;lv_obj_t *ui_moisture = NULL;lv_obj_t *ui_stock_index = NULL;lv_obj_t *ui_icon_stock = NULL;
 // event funtions
 
 // build funtions
@@ -92,7 +92,7 @@ lv_obj_set_style_text_font(ui_current_humid, &lv_font_montserrat_20, LV_PART_MAI
 ui_wkday = lv_label_create(ui_home);
 lv_obj_set_width( ui_wkday, LV_SIZE_CONTENT);  /// 1
 lv_obj_set_height( ui_wkday, LV_SIZE_CONTENT);   /// 1
-lv_obj_set_x( ui_wkday, -43 );
+lv_obj_set_x( ui_wkday, -45 );
 lv_obj_set_y( ui_wkday, -140 );
 lv_obj_set_align( ui_wkday, LV_ALIGN_CENTER );
 lv_label_set_text(ui_wkday,"MON");
@@ -184,17 +184,6 @@ lv_obj_set_y( ui_icon_temp, 89 );
 lv_obj_set_align( ui_icon_temp, LV_ALIGN_CENTER );
 lv_obj_add_flag( ui_icon_temp, LV_OBJ_FLAG_ADV_HITTEST );   /// Flags
 lv_obj_clear_flag( ui_icon_temp, LV_OBJ_FLAG_SCROLLABLE );    /// Flags
-
-ui_market = lv_label_create(ui_home);
-lv_obj_set_width( ui_market, 220);
-lv_obj_set_height( ui_market, LV_SIZE_CONTENT);   /// 1
-lv_obj_set_x( ui_market, 0 );
-lv_obj_set_y( ui_market, -55 );
-lv_obj_set_align( ui_market, LV_ALIGN_CENTER );
-lv_label_set_long_mode(ui_market,LV_LABEL_LONG_SCROLL_CIRCULAR);
-lv_label_set_text(ui_market,"KS 5,902.35 +2.3% KQ 788.25 -2.1%");
-lv_obj_set_style_text_align(ui_market, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN| LV_STATE_DEFAULT);
-lv_obj_set_style_text_font(ui_market, &lv_font_montserrat_20, LV_PART_MAIN| LV_STATE_DEFAULT);
 
 ui_arc_temp = lv_arc_create(ui_home);
 lv_obj_set_width( ui_arc_temp, 70);
@@ -326,6 +315,25 @@ lv_label_set_text(ui_moisture,"30%");
 lv_obj_add_flag( ui_moisture, LV_OBJ_FLAG_HIDDEN );   /// Flags
 lv_obj_set_style_text_font(ui_moisture, &lv_font_montserrat_24, LV_PART_MAIN| LV_STATE_DEFAULT);
 
+ui_stock_index = lv_label_create(ui_home);
+lv_obj_set_width( ui_stock_index, LV_SIZE_CONTENT);  /// 1
+lv_obj_set_height( ui_stock_index, LV_SIZE_CONTENT);   /// 1
+lv_obj_set_x( ui_stock_index, 18 );
+lv_obj_set_y( ui_stock_index, -52 );
+lv_obj_set_align( ui_stock_index, LV_ALIGN_CENTER );
+lv_label_set_text(ui_stock_index,"KS 5,902.35 +2.3%");
+lv_obj_set_style_text_font(ui_stock_index, &lv_font_montserrat_20, LV_PART_MAIN| LV_STATE_DEFAULT);
+
+ui_icon_stock = lv_img_create(ui_home);
+lv_img_set_src(ui_icon_stock, &ui_img_253782882);
+lv_obj_set_width( ui_icon_stock, LV_SIZE_CONTENT);  /// 1
+lv_obj_set_height( ui_icon_stock, LV_SIZE_CONTENT);   /// 1
+lv_obj_set_x( ui_icon_stock, -93 );
+lv_obj_set_y( ui_icon_stock, -56 );
+lv_obj_set_align( ui_icon_stock, LV_ALIGN_CENTER );
+lv_obj_add_flag( ui_icon_stock, LV_OBJ_FLAG_ADV_HITTEST );   /// Flags
+lv_obj_clear_flag( ui_icon_stock, LV_OBJ_FLAG_SCROLLABLE );    /// Flags
+
 }
 
 void ui_home_screen_destroy(void)
@@ -350,7 +358,6 @@ ui_current_celcus= NULL;
 ui_current_pct= NULL;
 ui_icon_humid= NULL;
 ui_icon_temp= NULL;
-ui_market= NULL;
 ui_arc_temp= NULL;
 ui_arc_humid= NULL;
 ui_celcus= NULL;
@@ -362,5 +369,7 @@ ui_temp_fcst= NULL;
 ui_banner= NULL;
 ui_moisture_label= NULL;
 ui_moisture= NULL;
+ui_stock_index= NULL;
+ui_icon_stock= NULL;
 
 }

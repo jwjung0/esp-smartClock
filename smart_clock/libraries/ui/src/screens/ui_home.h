@@ -30,7 +30,6 @@ extern lv_obj_t *ui_current_celcus;
 extern lv_obj_t *ui_current_pct;
 extern lv_obj_t *ui_icon_humid;
 extern lv_obj_t *ui_icon_temp;
-extern lv_obj_t *ui_market;
 extern lv_obj_t *ui_arc_temp;
 extern lv_obj_t *ui_arc_humid;
 extern lv_obj_t *ui_celcus;
@@ -42,6 +41,8 @@ extern lv_obj_t *ui_temp_fcst;
 extern lv_obj_t *ui_banner;
 extern lv_obj_t *ui_moisture_label;
 extern lv_obj_t *ui_moisture;
+extern lv_obj_t *ui_stock_index;
+extern lv_obj_t *ui_icon_stock;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus

@@ -41,6 +41,7 @@ LV_IMG_DECLARE( ui_img_539372687);   // assets/icons-wifi.png
 LV_IMG_DECLARE( ui_img_weather_clear_png);   // assets/weather_clear.png
 LV_IMG_DECLARE( ui_img_1433770785);   // assets/icons-humid.png
 LV_IMG_DECLARE( ui_img_icon_temp_png);   // assets/icon_temp.png
+LV_IMG_DECLARE( ui_img_253782882);   // assets/icons8-chart.png
 LV_IMG_DECLARE( ui_img_537441319);   // assets/icon-calendar.png
 LV_IMG_DECLARE( ui_img_icon_cloudy_night_png);   // assets/icon_cloudy_night.png
 LV_IMG_DECLARE( ui_img_icon_cloudy_sun_png);   // assets/icon_cloudy_sun.png

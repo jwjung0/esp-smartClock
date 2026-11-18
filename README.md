@@ -91,12 +91,12 @@ Reference unit prices for one build (esp32dev setup).
 - TTP223 touch toggles home ↔ climate chart (daily/monthly)
 - Wi‑Fi provisioning via local HTTP portal (SoftAP + STA)
 - NTP time sync in **KST (UTC+9)** → live `ui_time` / `ui_date`
-- Power policy: **2 min** config window after boot, then Wi‑Fi off; **daily** NTP resync; **every 30 min** climate data ingest (brief Wi‑Fi wake → POST → Naver weather + OpenWeather GET → Naver market GET → off). With radio off: CPU **40 MHz**, home loop idles until the next **1 Hz** colon/time tick (light sleep when BL is off/blanked or auto-BL is off; timed wait when auto-BL PWM must stay running). Radio on → CPU **240 MHz**. Indoor auto-BL curve caps ~**35%** duty (~5% night floor); sustained dark ≥**60 s** blanks the panel (TTP223 or lux rise wakes).
+- Power policy: **2 min** config window after boot, then Wi‑Fi off; **daily** NTP resync; **every 30 min** climate data ingest (brief Wi‑Fi wake → POST → Naver weather + OpenWeather GET → Naver market GET → off). With radio off: CPU **40 MHz**, home loop idles until the next **1 Hz** colon/time tick (light sleep when BL is off or auto-BL is off; timed wait when auto-BL PWM must stay running). Radio on → CPU **240 MHz**. Indoor auto-BL curve caps ~**60%** duty (~10% night floor; dim only, no night blank).
 - Climate ingest deploy targets: **local** (this Mac) vs **prod** (Ubuntu) via gitignored `include/ingest_config_*.h`
 - Live indoor T/RH from BME280 on `ui_temp*` / `ui_humid`
-- Ambient lux from VEML7700 → auto LCD backlight brightness (PWM; no ingest). Indoor log curve (~5% night floor, ~35% day cap) + dark blank. Config portal **Backlight** switch turns auto on/off (off = full brightness; stored in NVS `clockui` / `bl_auto`). **Weather** source stored in NVS `clockui` / `wx_src` (`naver` | `openweather`)
+- Ambient lux from VEML7700 → auto LCD backlight brightness (PWM; no ingest). Indoor log curve (~10% night floor, ~60% day cap). Config portal **Backlight** switch turns auto on/off (off = full brightness; stored in NVS `clockui` / `bl_auto`). **Weather** source stored in NVS `clockui` / `wx_src` (`naver` | `openweather`)
 - Outdoor weather → `ui_current_temp`, `ui_current_humid`, image `ui_weather`: config portal **Weather** source (default **Naver**; optional **OpenWeather**). The other provider is used if the selected one fails. OpenWeather needs a free-tier 2.5 key (One Call 3.0/4.0 need a paid plan)
-- Market ticker → scrolling Label `ui_market`: defaults **KS** / **KQ** / **Nasdaq** / **USD**, plus optional custom tickers from the config portal. **KS/KQ/USD** (+ custom) from **Naver Finance**; **Nasdaq** from **Yahoo** (`^IXIC`). Up = red, down = blue, flat = white
+- Market ticker → Label `ui_stock_index` (+ `ui_icon_stock`): one symbol at a time, rotates every **2 s**. Defaults **KS** / **KQ** / **Nasdaq** / **USD**, plus optional custom tickers from the config portal. **KS/KQ/USD** (+ custom) from **Naver Finance**; **Nasdaq** from **Yahoo** (`^IXIC`). Up = red, down = blue, flat = white
 
 **SquareLine outdoor weather**
 
@@ -110,10 +110,10 @@ Reference unit prices for one build (esp32dev setup).
 
 **SquareLine market ticker**
 
-- Widget: Label `ui_market` (fixed width ~220–240 px, long mode **Clip** / static, recolor on)
-- Firmware overwrites text with colored segments, e.g. `KS 5730.74 -3.48%  KQ 724.38 -3.83%  Nasdaq 25437.00 -2.86%  USD 1335.80 -0.35%`
+- Widgets: Label `ui_stock_index` + Image `ui_icon_stock` (recolor on)
+- Firmware shows one colored quote at a time, e.g. `KS 5,730.74 -3.48%`, advancing every 2 s
 - Refreshes on boot (if STA up) and on the same ~30 min climate wake as weather
-- **Config portal → Stock Market**: switch hides/shows the home scrollbar immediately; toggle default KS/KQ/Nasdaq/USD; add custom rows with English **Name** + Naver **Code** (e.g. `Samsung` / `005930`). Max 4 custom, 8 quotes total. Stored in NVS namespace `market`. Custom marquee uses the Name you enter (`Samsung 220,500 -5.17%`). Code kinds: 6-digit stock, `KOSPI`/`KOSDAQ`/`KPI200`, world index (`.IXIC`), FX (`FX_USDKRW`)
+- **Config portal → Stock Market**: switch hides/shows the home stock row immediately; toggle default KS/KQ/Nasdaq/USD; add custom rows with English **Name** + Naver **Code** (e.g. `Samsung` / `005930`). Max 4 custom, 8 quotes total. Stored in NVS namespace `market`. Custom rows use the Name you enter (`Samsung 220,500 -5.17%`). Code kinds: 6-digit stock, `KOSPI`/`KOSDAQ`/`KPI200`, world index (`.IXIC`), FX (`FX_USDKRW`)
 
 **Checkup**
 

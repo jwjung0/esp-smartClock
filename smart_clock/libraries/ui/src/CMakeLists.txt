@@ -9,6 +9,7 @@ SET(SOURCES screens/ui_loading.c
     images/ui_img_weather_clear_png.c
     images/ui_img_1433770785.c
     images/ui_img_icon_temp_png.c
+    images/ui_img_253782882.c
     images/ui_img_537441319.c
     images/ui_img_icon_cloudy_night_png.c
     images/ui_img_icon_cloudy_sun_png.c
