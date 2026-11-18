@@ -1070,6 +1070,32 @@ static bool marketNextValidIndex(size_t from, size_t *outIndex) {
   return false;
 }
 
+// Largest Montserrat that fits the stock row (icon left, ~185px usable).
+static const lv_font_t *marketFontForPlain(const char *plain) {
+  static const lv_font_t *kFonts[] = {
+      &lv_font_montserrat_20, &lv_font_montserrat_18, &lv_font_montserrat_16,
+      &lv_font_montserrat_14, &lv_font_montserrat_12,
+  };
+  static const lv_coord_t kMaxW = 185;
+  if (!plain)
+    return kFonts[0];
+  const uint32_t len = (uint32_t)strlen(plain);
+  for (size_t i = 0; i < sizeof(kFonts) / sizeof(kFonts[0]); ++i) {
+    const lv_coord_t w =
+        lv_txt_get_width(plain, len, kFonts[i], 0, LV_TEXT_FLAG_NONE);
+    if (w <= kMaxW)
+      return kFonts[i];
+  }
+  return kFonts[sizeof(kFonts) / sizeof(kFonts[0]) - 1];
+}
+
+static void setMarketLabel(const char *plain, const char *colored) {
+  if (!ui_stock_index)
+    return;
+  lv_obj_set_style_text_font(ui_stock_index, marketFontForPlain(plain), kMain);
+  lv_label_set_text(ui_stock_index, colored ? colored : plain);
+}
+
 static void paintMarketPage(void) {
   if (!ui_stock_index)
     return;
@@ -1077,7 +1103,7 @@ static void paintMarketPage(void) {
   lv_label_set_recolor(ui_stock_index, true);
 
   if (!marketFetchHasData() || marketFetchCount() == 0) {
-    lv_label_set_text(ui_stock_index, "KS --");
+    setMarketLabel("KS --", nullptr);
     return;
   }
 
@@ -1085,22 +1111,25 @@ static void paintMarketPage(void) {
   MarketQuote q;
   if (!marketFetchGetAt(idx, &q) || !q.valid) {
     if (!marketNextValidIndex(0, &idx)) {
-      lv_label_set_text(ui_stock_index, "KS --");
+      setMarketLabel("KS --", nullptr);
       return;
     }
     marketPageIndex = idx;
     if (!marketFetchGetAt(idx, &q) || !q.valid) {
-      lv_label_set_text(ui_stock_index, "KS --");
+      setMarketLabel("KS --", nullptr);
       return;
     }
   }
 
   char priceBuf[24];
   formatPriceWithCommas(q.price, priceBuf, sizeof(priceBuf));
+  char plain[72];
+  snprintf(plain, sizeof(plain), "%s %s %+0.2f%%", q.tag, priceBuf,
+           (double)q.pct);
   char line[96];
-  snprintf(line, sizeof(line), "#%06X %s %s %+0.2f%%#",
-           (unsigned)marketColorForPct(q.pct), q.tag, priceBuf, (double)q.pct);
-  lv_label_set_text(ui_stock_index, line);
+  snprintf(line, sizeof(line), "#%06X %s#", (unsigned)marketColorForPct(q.pct),
+           plain);
+  setMarketLabel(plain, line);
 }
 
 static void updateMarketUi() {
