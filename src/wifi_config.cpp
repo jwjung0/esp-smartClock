@@ -228,7 +228,7 @@ static void handleRoot() {
   const String clockHtml = colorToHtml(clockColor);
 
   String html;
-  html.reserve(11000);
+  html.reserve(12000);
   html += F("<!DOCTYPE html><html><head><meta charset=utf-8>"
             "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
             "<title>SmartClock WiFi</title><style>"
@@ -378,6 +378,8 @@ static void handleRoot() {
         F("{\"v\":1,\"d\":{\"KS\":1,\"KQ\":1,\"Nasdaq\":1,\"USD\":1},\"c\":[]}");
 
   const bool blAutoOn = blCtrlAutoEnabled();
+  const uint8_t blNightPct = blCtrlNightPct();
+  const uint8_t blDayPct = blCtrlDayPct();
   const bool wxPreferNaver = weatherConfigPreferNaver();
 
   html += F("<section class=box>"
@@ -390,8 +392,20 @@ static void handleRoot() {
   html += F(">"
             "<span class=slider></span>"
             "</label></div>"
-            "<p class=hint>On: brightness follows ambient light. "
-            "Off: full brightness.</p>"
+            "<p class=hint>On: brightness follows ambient light "
+            "(Night % in the dark → Day % in normal room light; "
+            "Day 100% = full PWM). Off: full brightness.</p>"
+            "<div class=mkt-add style=\"grid-template-columns:1fr 1fr\">"
+            "<div><label for=bl_night>Night %</label>"
+            "<input type=number id=bl_night min=1 max=100 step=1 value=\"");
+  html += String((unsigned)blNightPct);
+  html += F("\"></div>"
+            "<div><label for=bl_day>Day %</label>"
+            "<input type=number id=bl_day min=1 max=100 step=1 value=\"");
+  html += String((unsigned)blDayPct);
+  html += F("\"></div>"
+            "</div>"
+            "<button type=button id=bl_save>Save levels</button>"
             "<p class=msg id=bl_msg style=\"display:none\"></p>"
             "</section>");
 
@@ -610,12 +624,34 @@ static void handleRoot() {
             "function blMsg(t,ok){"
             "const m=document.getElementById('bl_msg');"
             "m.style.display='block';m.style.color=ok?'#7d7':'#effa5c';m.textContent=t;}"
+            "function blClamp(){"
+            "let n=parseInt(document.getElementById('bl_night').value,10);"
+            "let d=parseInt(document.getElementById('bl_day').value,10);"
+            "if(!Number.isFinite(n))n=20;if(!Number.isFinite(d))d=80;"
+            "n=Math.min(100,Math.max(1,n));d=Math.min(100,Math.max(1,d));"
+            "if(n>d)n=d;"
+            "document.getElementById('bl_night').value=String(n);"
+            "document.getElementById('bl_day').value=String(d);"
+            "return{n:n,d:d};}"
             "document.getElementById('bl_auto').addEventListener('change',()=>{"
             "const on=!!document.getElementById('bl_auto').checked;"
             "fetch('/backlight',{method:'POST',headers:{'Content-Type':"
             "'application/x-www-form-urlencoded'},body:'auto='+(on?'1':'0')})"
             ".then(r=>r.json()).then(j=>{"
             "if(j&&j.ok){blMsg(on?'Auto brightness On':'Auto brightness Off',true);}"
+            "else{blMsg('Save failed',false);}})"
+            ".catch(()=>blMsg('Save failed',false));});"
+            "document.getElementById('bl_save').addEventListener('click',()=>{"
+            "const v=blClamp();"
+            "fetch('/backlight',{method:'POST',headers:{'Content-Type':"
+            "'application/x-www-form-urlencoded'},"
+            "body:'night='+v.n+'&day='+v.d})"
+            ".then(r=>r.json()).then(j=>{"
+            "if(j&&j.ok){"
+            "if(j.night!=null)document.getElementById('bl_night').value=String(j.night);"
+            "if(j.day!=null)document.getElementById('bl_day').value=String(j.day);"
+            "blMsg('Night '+document.getElementById('bl_night').value+"
+            "'% · Day '+document.getElementById('bl_day').value+'%',true);}"
             "else{blMsg('Save failed',false);}})"
             ".catch(()=>blMsg('Save failed',false));});"
             "function wxMsg(t,ok){"
@@ -749,13 +785,34 @@ static void handleColors() {
 
 static void handleBacklight() {
   const String autoArg = server.arg("auto");
-  if (!autoArg.length()) {
+  const String nightArg = server.arg("night");
+  const String dayArg = server.arg("day");
+
+  if (autoArg.length()) {
+    const bool on =
+        autoArg != "0" && autoArg != "false" && autoArg != "off";
+    blCtrlSetAutoEnabled(on);
+    server.send(200, "application/json", "{\"ok\":true}");
+    return;
+  }
+
+  if (!nightArg.length() || !dayArg.length()) {
     server.send(400, "application/json", "{\"ok\":false}");
     return;
   }
-  const bool on = autoArg != "0" && autoArg != "false" && autoArg != "off";
-  blCtrlSetAutoEnabled(on);
-  server.send(200, "application/json", "{\"ok\":true}");
+
+  const int night = nightArg.toInt();
+  const int day = dayArg.toInt();
+  if (night < 1 || night > 100 || day < 1 || day > 100) {
+    server.send(400, "application/json", "{\"ok\":false}");
+    return;
+  }
+
+  (void)blCtrlSetNightDayPct((uint8_t)night, (uint8_t)day);
+  char buf[64];
+  snprintf(buf, sizeof(buf), "{\"ok\":true,\"night\":%u,\"day\":%u}",
+           (unsigned)blCtrlNightPct(), (unsigned)blCtrlDayPct());
+  server.send(200, "application/json", buf);
 }
 
 static void handleWeather() {

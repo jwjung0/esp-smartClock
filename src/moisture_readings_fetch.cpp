@@ -8,7 +8,6 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 #if defined(INGEST_ENV_LOCAL)
 #include "ingest_config_local.h"
@@ -33,18 +32,24 @@ static bool hasData = false;
 static bool updatedFlag = false;
 static bool hasLatest = false;
 static float latestPct = NAN;
-static uint8_t dayCount = 0;
+static uint16_t sampleCount = 0;
+static uint16_t daySpan = 0;
 static Ymd rangeStart = {};
 static Ymd rangeEnd = {};
-static int16_t dailyPct[MOISTURE_READINGS_DAILY_MAX];
-static Ymd dailyDate[MOISTURE_READINGS_DAILY_MAX];
+static int16_t samples[MOISTURE_READINGS_MAX];
+static uint8_t sampleMon[MOISTURE_READINGS_MAX];
+static uint8_t sampleDay[MOISTURE_READINGS_MAX];
+static uint8_t sampleHour[MOISTURE_READINGS_MAX];
 
 static void clearSeries(void) {
-  for (size_t i = 0; i < MOISTURE_READINGS_DAILY_MAX; ++i) {
-    dailyPct[i] = LV_CHART_POINT_NONE;
-    dailyDate[i] = {};
+  for (size_t i = 0; i < MOISTURE_READINGS_MAX; ++i) {
+    samples[i] = LV_CHART_POINT_NONE;
+    sampleMon[i] = 0;
+    sampleDay[i] = 0;
+    sampleHour[i] = 0;
   }
-  dayCount = 0;
+  sampleCount = 0;
+  daySpan = 0;
   rangeStart = {};
   rangeEnd = {};
   hasLatest = false;
@@ -62,41 +67,34 @@ static int16_t toCoord(float v) {
   return (int16_t)r;
 }
 
-static bool parseYmdPrefix(const char *s, Ymd *out) {
-  if (!out)
-    return false;
-  *out = {};
+static bool parseAt(const char *s, Ymd *dayOut, int *hourOut) {
+  if (dayOut)
+    *dayOut = {};
+  if (hourOut)
+    *hourOut = 0;
   if (!s || !s[0])
     return false;
-  int y = 0, m = 0, d = 0;
-  if (sscanf(s, "%d-%d-%d", &y, &m, &d) != 3)
+  int y = 0, m = 0, d = 0, h = 0;
+  // "2026-11-20T10:00:00+09:00" — hour optional for start/end.
+  if (sscanf(s, "%d-%d-%dT%d", &y, &m, &d, &h) < 3)
     return false;
   if (y < 2000 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31)
     return false;
-  out->y = y;
-  out->m = m;
-  out->d = d;
-  out->ok = true;
+  if (h < 0 || h > 23)
+    h = 0;
+  if (dayOut) {
+    dayOut->y = y;
+    dayOut->m = m;
+    dayOut->d = d;
+    dayOut->ok = true;
+  }
+  if (hourOut)
+    *hourOut = h;
   return true;
 }
 
 static bool sameYmd(const Ymd &a, const Ymd &b) {
   return a.ok && b.ok && a.y == b.y && a.m == b.m && a.d == b.d;
-}
-
-static void pushDaily(const Ymd &day, float mean) {
-  if (!day.ok || isnan(mean))
-    return;
-  if (dayCount >= MOISTURE_READINGS_DAILY_MAX) {
-    memmove(&dailyPct[0], &dailyPct[1],
-            sizeof(dailyPct[0]) * (MOISTURE_READINGS_DAILY_MAX - 1));
-    memmove(&dailyDate[0], &dailyDate[1],
-            sizeof(dailyDate[0]) * (MOISTURE_READINGS_DAILY_MAX - 1));
-    dayCount = MOISTURE_READINGS_DAILY_MAX - 1;
-  }
-  dailyPct[dayCount] = toCoord(mean);
-  dailyDate[dayCount] = day;
-  dayCount++;
 }
 
 void moistureReadingsFetchBegin(void) {
@@ -114,13 +112,11 @@ bool moistureReadingsFetchOnce(void) {
 
   HTTPClient http;
   http.setTimeout(8000);
-  if (!http.begin(MOISTURE_READINGS_URL)) {
+  if (!http.begin(MOISTURE_HISTORY_URL)) {
     Serial.println("moisture readings: http.begin failed");
     return false;
   }
-  char authHdr[192];
-  snprintf(authHdr, sizeof(authHdr), "Bearer %s", API_ACCESS_TOKEN);
-  http.addHeader("Authorization", authHdr);
+  http.addHeader("X-Device-Token", DEVICE_INGEST_TOKEN);
 
   yield();
   const int code = http.GET();
@@ -131,7 +127,6 @@ bool moistureReadingsFetchOnce(void) {
     return false;
   }
 
-  // Raw list can be hundreds of samples; keep room for day buckets.
   JsonDocument doc;
   const DeserializationError err = deserializeJson(doc, http.getStream());
   http.end();
@@ -141,66 +136,87 @@ bool moistureReadingsFetchOnce(void) {
     return false;
   }
 
-  JsonArray rows = doc.as<JsonArray>();
+  JsonObject root = doc.as<JsonObject>();
+  if (root.isNull()) {
+    Serial.println("moisture readings: expected object");
+    return false;
+  }
+
+  JsonArray rows = root["hourly"].as<JsonArray>();
   if (rows.isNull()) {
-    Serial.println("moisture readings: expected array");
+    Serial.println("moisture readings: expected hourly array");
     return false;
   }
 
   clearSeries();
 
-  Ymd curDay = {};
-  float sum = 0;
-  int n = 0;
-  float lastPct = NAN;
+  Ymd start = {};
+  Ymd end = {};
+  (void)parseAt(root["start"] | "", &start, nullptr);
+  (void)parseAt(root["end"] | "", &end, nullptr);
 
-  for (JsonObject row : rows) {
+  const size_t total = rows.size();
+  size_t begin = 0;
+  if (total > MOISTURE_READINGS_MAX)
+    begin = total - MOISTURE_READINGS_MAX;
+
+  float lastPct = NAN;
+  Ymd prevDay = {};
+  uint16_t span = 0;
+
+  for (size_t i = begin; i < total; ++i) {
+    JsonObject row = rows[i].as<JsonObject>();
     if (row.isNull())
       continue;
-    if (!row["moisture_pct"].is<float>() && !row["moisture_pct"].is<int>() &&
-        !row["moisture_pct"].is<double>() && !row["moisture_pct"].is<long>())
-      continue;
-    const float pct = row["moisture_pct"].as<float>();
-    const char *at = row["measured_at"] | "";
+    if (sampleCount >= MOISTURE_READINGS_MAX)
+      break;
+
     Ymd day = {};
-    if (!parseYmdPrefix(at, &day))
+    int hour = 0;
+    const char *at = row["at"] | "";
+    if (!parseAt(at, &day, &hour)) {
+      samples[sampleCount++] = LV_CHART_POINT_NONE;
       continue;
+    }
 
+    sampleMon[sampleCount] = (uint8_t)day.m;
+    sampleDay[sampleCount] = (uint8_t)day.d;
+    sampleHour[sampleCount] = (uint8_t)hour;
+
+    if (!prevDay.ok || !sameYmd(prevDay, day)) {
+      span++;
+      prevDay = day;
+    }
+    if (!rangeStart.ok)
+      rangeStart = day;
+    rangeEnd = day;
+
+    if (row["m"].isNull() ||
+        (!row["m"].is<float>() && !row["m"].is<int>() &&
+         !row["m"].is<double>() && !row["m"].is<long>())) {
+      samples[sampleCount++] = LV_CHART_POINT_NONE;
+      continue;
+    }
+    const float pct = row["m"].as<float>();
+    samples[sampleCount++] = toCoord(pct);
     lastPct = pct;
-
-    if (!curDay.ok) {
-      curDay = day;
-      sum = pct;
-      n = 1;
-      continue;
-    }
-    if (sameYmd(curDay, day)) {
-      sum += pct;
-      n++;
-      continue;
-    }
-    if (n > 0)
-      pushDaily(curDay, sum / (float)n);
-    curDay = day;
-    sum = pct;
-    n = 1;
   }
-  if (n > 0)
-    pushDaily(curDay, sum / (float)n);
+
+  if (start.ok)
+    rangeStart = start;
+  if (end.ok)
+    rangeEnd = end;
+  daySpan = span;
 
   if (!isnan(lastPct)) {
     latestPct = lastPct;
     hasLatest = true;
   }
 
-  if (dayCount > 0) {
-    rangeStart = dailyDate[0];
-    rangeEnd = dailyDate[dayCount - 1];
-  }
-
-  hasData = hasLatest || dayCount > 0;
+  hasData = sampleCount > 0;
   updatedFlag = true;
-  Serial.printf("moisture readings ok  days=%u", dayCount);
+  Serial.printf("moisture readings ok  hourly=%u  days=%u", sampleCount,
+                daySpan);
   if (hasLatest)
     Serial.printf("  latest=%.1f", latestPct);
   if (rangeStart.ok && rangeEnd.ok)
@@ -220,7 +236,9 @@ bool moistureReadingsTakeUpdated(void) {
   return true;
 }
 
-uint8_t moistureReadingsDayCount(void) { return dayCount; }
+uint16_t moistureReadingsCount(void) { return sampleCount; }
+
+uint16_t moistureReadingsDaySpan(void) { return daySpan; }
 
 bool moistureReadingsGetStart(int *yearOut, int *monthOut, int *dayOut) {
   if (!rangeStart.ok)
@@ -246,13 +264,20 @@ bool moistureReadingsGetEnd(int *yearOut, int *monthOut, int *dayOut) {
   return true;
 }
 
-bool moistureReadingsDateAt(uint8_t index, int *monthOut, int *dayOut) {
-  if (index >= dayCount || !dailyDate[index].ok)
+bool moistureReadingsDateAt(uint16_t index, int *monthOut, int *dayOut) {
+  if (index >= sampleCount || sampleMon[index] < 1 || sampleDay[index] < 1)
     return false;
   if (monthOut)
-    *monthOut = dailyDate[index].m;
+    *monthOut = sampleMon[index];
   if (dayOut)
-    *dayOut = dailyDate[index].d;
+    *dayOut = sampleDay[index];
+  return true;
+}
+
+bool moistureReadingsHourAt(uint16_t index, int *hourOut) {
+  if (index >= sampleCount || !hourOut)
+    return false;
+  *hourOut = sampleHour[index];
   return true;
 }
 
@@ -263,13 +288,13 @@ bool moistureReadingsLatestPct(float *pctOut) {
   return true;
 }
 
-bool moistureReadingsCopyDaily(int16_t *pctOut, size_t n, uint8_t *daysOut) {
-  if (!hasData || !pctOut || n < MOISTURE_READINGS_DAILY_MAX)
+bool moistureReadingsCopySeries(int16_t *pctOut, size_t n, uint16_t *countOut) {
+  if (!hasData || !pctOut || n < MOISTURE_READINGS_MAX)
     return false;
-  for (size_t i = 0; i < MOISTURE_READINGS_DAILY_MAX; ++i)
-    pctOut[i] = (i < dayCount) ? dailyPct[i] : LV_CHART_POINT_NONE;
-  if (daysOut)
-    *daysOut = dayCount;
+  for (size_t i = 0; i < MOISTURE_READINGS_MAX; ++i)
+    pctOut[i] = (i < sampleCount) ? samples[i] : LV_CHART_POINT_NONE;
+  if (countOut)
+    *countOut = sampleCount;
   return true;
 }
 
@@ -279,11 +304,13 @@ void moistureReadingsFetchBegin(void) {}
 bool moistureReadingsFetchOnce(void) { return false; }
 bool moistureReadingsHasData(void) { return false; }
 bool moistureReadingsTakeUpdated(void) { return false; }
-uint8_t moistureReadingsDayCount(void) { return 0; }
+uint16_t moistureReadingsCount(void) { return 0; }
+uint16_t moistureReadingsDaySpan(void) { return 0; }
 bool moistureReadingsGetStart(int *, int *, int *) { return false; }
 bool moistureReadingsGetEnd(int *, int *, int *) { return false; }
-bool moistureReadingsDateAt(uint8_t, int *, int *) { return false; }
+bool moistureReadingsDateAt(uint16_t, int *, int *) { return false; }
+bool moistureReadingsHourAt(uint16_t, int *) { return false; }
 bool moistureReadingsLatestPct(float *) { return false; }
-bool moistureReadingsCopyDaily(int16_t *, size_t, uint8_t *) { return false; }
+bool moistureReadingsCopySeries(int16_t *, size_t, uint16_t *) { return false; }
 
 #endif

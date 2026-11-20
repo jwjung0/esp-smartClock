@@ -8,7 +8,8 @@
 extern "C" {
 #endif
 
-#define MOISTURE_READINGS_DAILY_MAX 30
+// Cap ≥ server rolling window (~20d×24h). Chart plots every hourly point.
+#define MOISTURE_READINGS_MAX 500
 
 void moistureReadingsFetchBegin(void);
 
@@ -18,19 +19,25 @@ bool moistureReadingsFetchOnce(void);
 bool moistureReadingsHasData(void);
 bool moistureReadingsTakeUpdated(void); // true once per successful parse
 
-uint8_t moistureReadingsDayCount(void);
+uint16_t moistureReadingsCount(void);
 
-// Window from first/last daily bucket (KST calendar dates).
+// Calendar day span of the series (for period title).
+uint16_t moistureReadingsDaySpan(void);
+
+// Window from first/last hourly `at` (display TZ calendar dates).
 bool moistureReadingsGetStart(int *yearOut, int *monthOut, int *dayOut);
 bool moistureReadingsGetEnd(int *yearOut, int *monthOut, int *dayOut);
-bool moistureReadingsDateAt(uint8_t index, int *monthOut, int *dayOut);
 
-// Latest sample moisture_pct (for home banner).
+// Per-point calendar fields for X tick labels.
+bool moistureReadingsDateAt(uint16_t index, int *monthOut, int *dayOut);
+bool moistureReadingsHourAt(uint16_t index, int *hourOut);
+
+// Latest non-null hourly m (for home banner).
 bool moistureReadingsLatestPct(float *pctOut);
 
-// Copy chart Y array (lv_coord). Missing samples are LV_CHART_POINT_NONE.
-// daysOut = number of daily points written (≤ MOISTURE_READINGS_DAILY_MAX).
-bool moistureReadingsCopyDaily(int16_t *pctOut, size_t n, uint8_t *daysOut);
+// Copy chart Y array (lv_coord). Unused slots are LV_CHART_POINT_NONE.
+// countOut = number of hourly points written (≤ MOISTURE_READINGS_MAX).
+bool moistureReadingsCopySeries(int16_t *pctOut, size_t n, uint16_t *countOut);
 
 #if defined(__cplusplus)
 }

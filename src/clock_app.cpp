@@ -53,7 +53,7 @@ static lv_coord_t chartDailyT[CLIMATE_HISTORY_DAILY_N];
 static lv_coord_t chartDailyRh[CLIMATE_HISTORY_DAILY_N];
 static lv_coord_t chartMonthlyT[CLIMATE_HISTORY_MONTHLY_MAX];
 static lv_coord_t chartMonthlyRh[CLIMATE_HISTORY_MONTHLY_MAX];
-static lv_coord_t chartMoisturePct[MOISTURE_READINGS_DAILY_MAX];
+static lv_coord_t chartMoisturePct[MOISTURE_READINGS_MAX];
 static lv_chart_series_t *chart1Temp = nullptr;
 static lv_chart_series_t *chart1Rh = nullptr;
 static lv_chart_series_t *chart2Temp = nullptr;
@@ -333,7 +333,7 @@ static void clearChartBuffers(void) {
     chartMonthlyT[i] = LV_CHART_POINT_NONE;
     chartMonthlyRh[i] = LV_CHART_POINT_NONE;
   }
-  for (size_t i = 0; i < MOISTURE_READINGS_DAILY_MAX; ++i)
+  for (size_t i = 0; i < MOISTURE_READINGS_MAX; ++i)
     chartMoisturePct[i] = LV_CHART_POINT_NONE;
 }
 
@@ -435,17 +435,30 @@ static void onChartXTickLabel(lv_event_t *e) {
     else
       lv_snprintf(dsc->text, dsc->text_length, "%d", dayIndex + 1);
   } else if (obj == ui_chart3) {
-    const int days = (int)moistureReadingsDayCount();
-    int dayIndex = (days > 7) ? (v * 7) : v;
-    if (dayIndex < 0)
-      dayIndex = 0;
-    if (days > 0 && dayIndex >= days)
-      dayIndex = days - 1;
-    int mon = 0, day = 0;
-    if (moistureReadingsDateAt((uint8_t)dayIndex, &mon, &day))
-      lv_snprintf(dsc->text, dsc->text_length, "%d", day);
-    else
-      lv_snprintf(dsc->text, dsc->text_length, "%d", dayIndex + 1);
+    const int n = (int)moistureReadingsCount();
+    if (n < 1) {
+      dsc->text[0] = '\0';
+      return;
+    }
+    // 5 majors spaced across the series (see applyMoistureXAxis).
+    int idx = (n <= 1) ? 0 : (v * (n - 1)) / 4;
+    if (idx < 0)
+      idx = 0;
+    if (idx >= n)
+      idx = n - 1;
+    if (moistureReadingsDaySpan() <= 1) {
+      int hour = 0;
+      if (moistureReadingsHourAt((uint16_t)idx, &hour))
+        lv_snprintf(dsc->text, dsc->text_length, "%dh", hour);
+      else
+        dsc->text[0] = '\0';
+    } else {
+      int mon = 0, day = 0;
+      if (moistureReadingsDateAt((uint16_t)idx, &mon, &day))
+        lv_snprintf(dsc->text, dsc->text_length, "%dd", day);
+      else
+        dsc->text[0] = '\0';
+    }
   }
 }
 
@@ -578,12 +591,26 @@ __attribute__((unused)) static void chartUiPump() {
   lvglPump();
 }
 
+static void applyMoistureXAxis(lv_obj_t *chart, uint16_t n) {
+  if (!chart)
+    return;
+  if (n < 1)
+    n = 1;
+  if (n > MOISTURE_READINGS_MAX)
+    n = MOISTURE_READINGS_MAX;
+
+  // Every hourly point; 5 labeled majors across the series.
+  lv_chart_set_point_count(chart, n);
+  lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_X, 5, 3, 5, 2, true, 20);
+  lv_chart_set_div_line_count(chart, 5, 5);
+}
+
 static void updateMoisturePeriodTitle(void) {
   if (!ui_period)
     return;
   int sm = 0, sd = 0, em = 0, ed = 0;
   char buf[40];
-  const uint8_t days = moistureReadingsDayCount();
+  const uint16_t days = moistureReadingsDaySpan();
   if (moistureReadingsGetStart(nullptr, &sm, &sd) &&
       moistureReadingsGetEnd(nullptr, &em, &ed) && days > 0) {
     snprintf(buf, sizeof(buf), "%d/%d ~ %d/%d (%u days)", sm, sd, em, ed,
@@ -598,22 +625,26 @@ static void paintMoistureChartFromCache(void) {
   if (!moistureChartSeriesBound || !ui_chart3 || !chart3Moisture)
     return;
 
-  uint8_t days = moistureReadingsDayCount();
-  if (days < 1)
-    days = 1;
-  if (days > MOISTURE_READINGS_DAILY_MAX)
-    days = MOISTURE_READINGS_DAILY_MAX;
+  uint16_t n = moistureReadingsCount();
+  if (n < 1)
+    n = 1;
+  if (n > MOISTURE_READINGS_MAX)
+    n = MOISTURE_READINGS_MAX;
 
   if (moistureReadingsHasData()) {
-    (void)moistureReadingsCopyDaily(
-        reinterpret_cast<int16_t *>(chartMoisturePct),
-        MOISTURE_READINGS_DAILY_MAX, &days);
+    (void)moistureReadingsCopySeries(
+        reinterpret_cast<int16_t *>(chartMoisturePct), MOISTURE_READINGS_MAX,
+        &n);
   }
 
   // Bind large Y buffer before raising point_count (SquareLine stub is 10 pts).
   lv_chart_set_ext_y_array(ui_chart3, chart3Moisture, chartMoisturePct);
   lv_chart_set_range(ui_chart3, LV_CHART_AXIS_PRIMARY_Y, 0, 100);
-  applyMonthlyXAxis(ui_chart3, days);
+  // Dense sample series — dots crowd the line; keep markers small.
+  lv_obj_set_style_size(ui_chart3, (n > 40) ? 0 : 2,
+                        (lv_style_selector_t)(LV_PART_INDICATOR |
+                                             LV_STATE_DEFAULT));
+  applyMoistureXAxis(ui_chart3, n);
   lv_chart_set_axis_tick(ui_chart3, LV_CHART_AXIS_PRIMARY_Y, 5, 3, 6, 2, true,
                          40);
   lv_chart_refresh(ui_chart3);
@@ -624,7 +655,7 @@ static void setupMoistureChartWidgets(void) {
   if (!ui_chart3)
     return;
 
-  for (size_t i = 0; i < MOISTURE_READINGS_DAILY_MAX; ++i)
+  for (size_t i = 0; i < MOISTURE_READINGS_MAX; ++i)
     chartMoisturePct[i] = LV_CHART_POINT_NONE;
 
   chart3Moisture = nullptr;
@@ -644,7 +675,7 @@ static void setupMoistureChartWidgets(void) {
   // Ext buffer first (still at SquareLine's 10-point count), then raise count.
   lv_chart_set_ext_y_array(ui_chart3, chart3Moisture, chartMoisturePct);
   lv_chart_set_range(ui_chart3, LV_CHART_AXIS_PRIMARY_Y, 0, 100);
-  applyMonthlyXAxis(ui_chart3, MOISTURE_READINGS_DAILY_MAX);
+  applyMoistureXAxis(ui_chart3, MOISTURE_READINGS_MAX);
   lv_chart_set_axis_tick(ui_chart3, LV_CHART_AXIS_PRIMARY_Y, 5, 3, 6, 2, true,
                          40);
 
