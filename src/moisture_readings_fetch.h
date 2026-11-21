@@ -39,6 +39,9 @@ bool moistureReadingsLatestPct(float *pctOut);
 // countOut = number of hourly points written (≤ MOISTURE_READINGS_MAX).
 bool moistureReadingsCopySeries(int16_t *pctOut, size_t n, uint16_t *countOut);
 
+// Primary Y: floor(min) / ceil(max) of valid hourly m values.
+bool moistureReadingsGetPctAxis(int16_t *yminOut, int16_t *ymaxOut);
+
 #if defined(__cplusplus)
 }
 #endif

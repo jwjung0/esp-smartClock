@@ -40,6 +40,8 @@ static int16_t samples[MOISTURE_READINGS_MAX];
 static uint8_t sampleMon[MOISTURE_READINGS_MAX];
 static uint8_t sampleDay[MOISTURE_READINGS_MAX];
 static uint8_t sampleHour[MOISTURE_READINGS_MAX];
+static float sampleMin = NAN;
+static float sampleMax = NAN;
 
 static void clearSeries(void) {
   for (size_t i = 0; i < MOISTURE_READINGS_MAX; ++i) {
@@ -54,6 +56,8 @@ static void clearSeries(void) {
   rangeEnd = {};
   hasLatest = false;
   latestPct = NAN;
+  sampleMin = NAN;
+  sampleMax = NAN;
 }
 
 static int16_t toCoord(float v) {
@@ -65,6 +69,37 @@ static int16_t toCoord(float v) {
   if (r < -32767)
     return -32767;
   return (int16_t)r;
+}
+
+static void notePctFloat(float v, float *mn, float *mx) {
+  if (!mn || !mx || isnan(v))
+    return;
+  if (isnan(*mn) || v < *mn)
+    *mn = v;
+  if (isnan(*mx) || v > *mx)
+    *mx = v;
+}
+
+static bool pctAxisFromFloats(float pmin, float pmax, int16_t *yminOut,
+                              int16_t *ymaxOut) {
+  if (!yminOut || !ymaxOut || isnan(pmin) || isnan(pmax))
+    return false;
+  // Axis ints: floor(min), ceil(max) — e.g. 45.2 → 45..46.
+  long lo = (long)floorf(pmin);
+  long hi = (long)ceilf(pmax);
+  if (lo > 32766)
+    lo = 32766;
+  if (lo < -32767)
+    lo = -32767;
+  if (hi > 32766)
+    hi = 32766;
+  if (hi < -32767)
+    hi = -32767;
+  if (lo >= hi)
+    hi = lo + 1;
+  *yminOut = (int16_t)lo;
+  *ymaxOut = (int16_t)hi;
+  return true;
 }
 
 static bool parseAt(const char *s, Ymd *dayOut, int *hourOut) {
@@ -199,6 +234,7 @@ bool moistureReadingsFetchOnce(void) {
     }
     const float pct = row["m"].as<float>();
     samples[sampleCount++] = toCoord(pct);
+    notePctFloat(pct, &sampleMin, &sampleMax);
     lastPct = pct;
   }
 
@@ -298,6 +334,12 @@ bool moistureReadingsCopySeries(int16_t *pctOut, size_t n, uint16_t *countOut) {
   return true;
 }
 
+bool moistureReadingsGetPctAxis(int16_t *yminOut, int16_t *ymaxOut) {
+  if (!hasData)
+    return false;
+  return pctAxisFromFloats(sampleMin, sampleMax, yminOut, ymaxOut);
+}
+
 #else
 
 void moistureReadingsFetchBegin(void) {}
@@ -312,5 +354,6 @@ bool moistureReadingsDateAt(uint16_t, int *, int *) { return false; }
 bool moistureReadingsHourAt(uint16_t, int *) { return false; }
 bool moistureReadingsLatestPct(float *) { return false; }
 bool moistureReadingsCopySeries(int16_t *, size_t, uint16_t *) { return false; }
+bool moistureReadingsGetPctAxis(int16_t *, int16_t *) { return false; }
 
 #endif

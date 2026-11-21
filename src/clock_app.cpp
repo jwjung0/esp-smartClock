@@ -339,6 +339,8 @@ static void clearChartBuffers(void) {
 
 static const int16_t kTempAxisFallbackMin = 0;
 static const int16_t kTempAxisFallbackMax = 40;
+static const int16_t kMoistureAxisFallbackMin = 0;
+static const int16_t kMoistureAxisFallbackMax = 100;
 
 static void findChartSeries(lv_obj_t *chart, lv_chart_series_t **tempOut,
                             lv_chart_series_t **rhOut) {
@@ -639,11 +641,16 @@ static void paintMoistureChartFromCache(void) {
 
   // Bind large Y buffer before raising point_count (SquareLine stub is 10 pts).
   lv_chart_set_ext_y_array(ui_chart3, chart3Moisture, chartMoisturePct);
-  lv_chart_set_range(ui_chart3, LV_CHART_AXIS_PRIMARY_Y, 0, 100);
+  // Primary Y %: floor(min) / ceil(max) of moisture samples.
+  int16_t yMin = kMoistureAxisFallbackMin;
+  int16_t yMax = kMoistureAxisFallbackMax;
+  if (!moistureReadingsGetPctAxis(&yMin, &yMax)) {
+    yMin = kMoistureAxisFallbackMin;
+    yMax = kMoistureAxisFallbackMax;
+  }
+  lv_chart_set_range(ui_chart3, LV_CHART_AXIS_PRIMARY_Y, yMin, yMax);
   // Dense sample series — dots crowd the line; keep markers small.
-  lv_obj_set_style_size(ui_chart3, (n > 40) ? 0 : 2,
-                        (lv_style_selector_t)(LV_PART_INDICATOR |
-                                             LV_STATE_DEFAULT));
+  lv_obj_set_style_size(ui_chart3, (n > 40) ? 0 : 2, kIndicator);
   applyMoistureXAxis(ui_chart3, n);
   lv_chart_set_axis_tick(ui_chart3, LV_CHART_AXIS_PRIMARY_Y, 5, 3, 6, 2, true,
                          40);
