@@ -119,7 +119,7 @@ static void resetDefaultSlots(void) {
 
   addDef("KS", "KOSPI", MARKET_KIND_DOMESTIC_INDEX);
   addDef("KQ", "KOSDAQ", MARKET_KIND_DOMESTIC_INDEX);
-  addDef("Nasdaq", ".IXIC", MARKET_KIND_WORLD_INDEX);
+  addDef("NQ", ".IXIC", MARKET_KIND_WORLD_INDEX);
   addDef("USD", "FX_USDKRW", MARKET_KIND_FX);
 }
 
@@ -355,7 +355,8 @@ static size_t fetchDomesticStock(const MarketSlot &slot) {
 }
 
 static bool isNasdaqSlot(const MarketSlot &slot) {
-  return strcmp(slot.tag, "Nasdaq") == 0 || strcmp(slot.code, ".IXIC") == 0;
+  return strcmp(slot.tag, "NQ") == 0 || strcmp(slot.tag, "Nasdaq") == 0 ||
+         strcmp(slot.code, ".IXIC") == 0;
 }
 
 // Nasdaq only: Yahoo chart meta (~1.3KB). Naver's .IXIC basic JSON is too
@@ -524,16 +525,22 @@ static bool jsonFlagOn(JsonVariantConst v, bool defaultOn) {
 }
 
 static void applyDefaultsFromObj(JsonObjectConst d) {
-  static const char *kTags[] = {"KS", "KQ", "Nasdaq", "USD"};
+  static const char *kTags[] = {"KS", "KQ", "NQ", "USD"};
   for (const char *tag : kTags) {
     MarketSlot *s = findDefault(tag);
     if (!s)
       continue;
-    if (d.isNull() || !d[tag].is<JsonVariantConst>()) {
-      s->enabled = true;
+    if (!d.isNull() && d[tag].is<JsonVariantConst>()) {
+      s->enabled = jsonFlagOn(d[tag], true);
       continue;
     }
-    s->enabled = jsonFlagOn(d[tag], true);
+    // Legacy NVS key before ticker rename Nasdaq → NQ.
+    if (strcmp(tag, "NQ") == 0 && !d.isNull() &&
+        d["Nasdaq"].is<JsonVariantConst>()) {
+      s->enabled = jsonFlagOn(d["Nasdaq"], true);
+      continue;
+    }
+    s->enabled = true;
   }
 }
 
@@ -687,7 +694,14 @@ bool marketConfigApplyJson(const char *json, String *errMsg) {
 
   addDef("KS", "KOSPI", MARKET_KIND_DOMESTIC_INDEX, defOn("KS"));
   addDef("KQ", "KOSDAQ", MARKET_KIND_DOMESTIC_INDEX, defOn("KQ"));
-  addDef("Nasdaq", ".IXIC", MARKET_KIND_WORLD_INDEX, defOn("Nasdaq"));
+  {
+    bool nqOn = true;
+    if (!d.isNull() && d["NQ"].is<JsonVariantConst>())
+      nqOn = jsonFlagOn(d["NQ"], true);
+    else if (!d.isNull() && d["Nasdaq"].is<JsonVariantConst>())
+      nqOn = jsonFlagOn(d["Nasdaq"], true); // legacy key
+    addDef("NQ", ".IXIC", MARKET_KIND_WORLD_INDEX, nqOn);
+  }
   addDef("USD", "FX_USDKRW", MARKET_KIND_FX, defOn("USD"));
 
   JsonArrayConst customs = doc["c"].as<JsonArrayConst>();
@@ -922,7 +936,7 @@ size_t marketFetchCount(void) { return 0; }
 bool marketFetchGetAt(size_t, MarketQuote *) { return false; }
 void marketFetchReloadFromNvs(void) {}
 bool marketConfigGetJson(String &out) {
-  out = "{\"v\":1,\"d\":{\"KS\":1,\"KQ\":1,\"Nasdaq\":1,\"USD\":1},\"c\":[]}";
+  out = "{\"v\":1,\"d\":{\"KS\":1,\"KQ\":1,\"NQ\":1,\"USD\":1},\"c\":[]}";
   return true;
 }
 bool marketConfigApplyJson(const char *, String *errMsg) {

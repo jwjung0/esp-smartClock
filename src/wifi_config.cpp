@@ -375,7 +375,7 @@ static void handleRoot() {
   String marketJson;
   if (!marketConfigGetJson(marketJson))
     marketJson =
-        F("{\"v\":1,\"d\":{\"KS\":1,\"KQ\":1,\"Nasdaq\":1,\"USD\":1},\"c\":[]}");
+        F("{\"v\":1,\"d\":{\"KS\":1,\"KQ\":1,\"NQ\":1,\"USD\":1},\"c\":[]}");
 
   const bool blAutoOn = blCtrlAutoEnabled();
   const uint8_t blNightPct = blCtrlNightPct();
@@ -438,7 +438,7 @@ static void handleRoot() {
             "<div class=mkt-body id=mkt_body>"
             "<div class=chk><label><input type=checkbox id=mkt_KS> KS (KOSPI)</label></div>"
             "<div class=chk><label><input type=checkbox id=mkt_KQ> KQ (KOSDAQ)</label></div>"
-            "<div class=chk><label><input type=checkbox id=mkt_Nasdaq> Nasdaq</label></div>"
+            "<div class=chk><label><input type=checkbox id=mkt_NQ> NQ</label></div>"
             "<div class=chk><label><input type=checkbox id=mkt_USD> USD (USD/KRW)</label></div>"
             "<p class=hint>Custom: English name on the ticker + Naver code "
             "(e.g. Samsung / 005930). Max 4 custom, 8 quotes total.</p>"
@@ -566,8 +566,8 @@ static void handleRoot() {
             "if(typeof MKT.v==='undefined')MKT.v=1;"
             "function mktCollect(){"
             "MKT.v=document.getElementById('mkt_vis').checked?1:0;"
-            "MKT.d={KS:0,KQ:0,Nasdaq:0,USD:0};"
-            "['KS','KQ','Nasdaq','USD'].forEach(k=>{"
+            "MKT.d={KS:0,KQ:0,NQ:0,USD:0};"
+            "['KS','KQ','NQ','USD'].forEach(k=>{"
             "MKT.d[k]=document.getElementById('mkt_'+k).checked?1:0;});"
             "if(!MKT.c)MKT.c=[];}"
             "function mktPost(doneMsg){"
@@ -580,14 +580,14 @@ static void handleRoot() {
             "const on=!!document.getElementById('mkt_vis').checked;"
             "const body=document.getElementById('mkt_body');"
             "if(body)body.classList.toggle('dim',!on);"
-            "['mkt_KS','mkt_KQ','mkt_Nasdaq','mkt_USD','mkt_name','mkt_code',"
+            "['mkt_KS','mkt_KQ','mkt_NQ','mkt_USD','mkt_name','mkt_code',"
             "'mkt_add','mkt_save'].forEach(id=>{"
             "const el=document.getElementById(id);if(el)el.disabled=!on;});"
             "document.querySelectorAll('#mkt_list button').forEach(b=>{b.disabled=!on;});}"
             "function mktRender(){"
             "const vis=document.getElementById('mkt_vis');"
             "if(vis)vis.checked=!!Number(MKT.v);"
-            "['KS','KQ','Nasdaq','USD'].forEach(k=>{"
+            "['KS','KQ','NQ','USD'].forEach(k=>{"
             "const el=document.getElementById('mkt_'+k);"
             "if(el)el.checked=!!(MKT.d&&Number(MKT.d[k]));});"
             "const ul=document.getElementById('mkt_list');ul.innerHTML='';"
@@ -830,7 +830,7 @@ static void handleMarketGet() {
   String json;
   if (!marketConfigGetJson(json))
     json =
-        F("{\"v\":1,\"d\":{\"KS\":1,\"KQ\":1,\"Nasdaq\":1,\"USD\":1},\"c\":[]}");
+        F("{\"v\":1,\"d\":{\"KS\":1,\"KQ\":1,\"NQ\":1,\"USD\":1},\"c\":[]}");
   server.send(200, "application/json", json);
 }
 
