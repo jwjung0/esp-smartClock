@@ -61,6 +61,10 @@ static lv_chart_series_t *chart2Rh = nullptr;
 static lv_chart_series_t *chart3Moisture = nullptr;
 static bool chartSeriesBound = false;
 static bool moistureChartSeriesBound = false;
+// Moisture X tick mapping (shared by applyMoistureXAxis + onChartXTickLabel).
+static uint8_t moistureXMajorCnt = 2;
+static uint8_t moistureXSlotCount = 1; // daySpan or distinct-hour slots
+static bool moistureXHourMode = false;
 
 static uint32_t bootConfigUntilMs = 0;
 static uint32_t nextNtpSyncMs = 0;
@@ -82,6 +86,12 @@ static void showHome();
 static void showChart();
 static void showMoistureChart();
 static void updateMoistureBannerUi();
+static uint8_t fitMoistureYAxis(int16_t *yMin, int16_t *yMax);
+static uint8_t countMoistureDistinctHours(void);
+static int moistureIndexForDaySlot(int daySlot);
+static int moistureIndexForHourSlot(int hourSlot);
+static int moistureSlotForMajor(int majorIdx, int majors, int slots);
+static uint8_t applyMoistureXAxis(lv_obj_t *chart, uint16_t n);
 
 // Cast before | — LV_PART_* and LV_STATE_* are different enums (GCC warning).
 static const lv_style_selector_t kMain =
@@ -341,6 +351,116 @@ static const int16_t kTempAxisFallbackMin = 0;
 static const int16_t kTempAxisFallbackMax = 40;
 static const int16_t kMoistureAxisFallbackMin = 0;
 static const int16_t kMoistureAxisFallbackMax = 100;
+static const uint8_t kMoistureYMajorMax = 6;
+static const uint8_t kMoistureXMajorMax = 5;
+
+// Fit primary-Y range to unique integer majors (cap kMoistureYMajorMax).
+// Expands ymin downward when capped and span is not divisible by (majors-1).
+static uint8_t fitMoistureYAxis(int16_t *yMin, int16_t *yMax) {
+  if (!yMin || !yMax)
+    return 2;
+  if (*yMax <= *yMin)
+    *yMax = (int16_t)(*yMin + 1);
+
+  int span = (int)*yMax - (int)*yMin;
+  uint8_t majorCnt = (uint8_t)(span + 1);
+  if (majorCnt > kMoistureYMajorMax)
+    majorCnt = kMoistureYMajorMax;
+  if (majorCnt < 2)
+    majorCnt = 2;
+
+  const int steps = (int)majorCnt - 1;
+  int need = span;
+  if (need < steps)
+    need = steps;
+  if (need % steps != 0)
+    need = ((need + steps - 1) / steps) * steps;
+
+  int pad = need - span;
+  if (pad > 0) {
+    int ymin = (int)*yMin - pad;
+    if (ymin < 0) {
+      *yMax = (int16_t)(*yMax - ymin); // push remainder up
+      *yMin = 0;
+    } else {
+      *yMin = (int16_t)ymin;
+    }
+    span = (int)*yMax - (int)*yMin;
+    if (span % steps != 0)
+      *yMax = (int16_t)(*yMin + ((span + steps - 1) / steps) * steps);
+  }
+  return majorCnt;
+}
+
+static uint8_t countMoistureDistinctHours(void) {
+  const uint16_t n = moistureReadingsCount();
+  int prev = -1;
+  uint8_t count = 0;
+  for (uint16_t i = 0; i < n; ++i) {
+    int hour = 0;
+    if (!moistureReadingsHourAt(i, &hour))
+      continue;
+    if (hour != prev) {
+      ++count;
+      prev = hour;
+    }
+  }
+  return count;
+}
+
+static int moistureSlotForMajor(int majorIdx, int majors, int slots) {
+  if (majors <= 1 || slots <= 1)
+    return 0;
+  int s = (majorIdx * (slots - 1)) / (majors - 1);
+  if (s < 0)
+    s = 0;
+  if (s >= slots)
+    s = slots - 1;
+  return s;
+}
+
+// First sample index for the slot-th unique calendar day (0-based).
+static int moistureIndexForDaySlot(int daySlot) {
+  const int n = (int)moistureReadingsCount();
+  if (n < 1 || daySlot < 0)
+    return 0;
+  int slot = -1;
+  int prevMon = -1, prevDay = -1;
+  for (int i = 0; i < n; ++i) {
+    int mon = 0, day = 0;
+    if (!moistureReadingsDateAt((uint16_t)i, &mon, &day))
+      continue;
+    if (mon != prevMon || day != prevDay) {
+      ++slot;
+      prevMon = mon;
+      prevDay = day;
+    }
+    if (slot == daySlot)
+      return i;
+  }
+  return n - 1;
+}
+
+// First sample index for the slot-th unique hour run (0-based, single-day mode).
+static int moistureIndexForHourSlot(int hourSlot) {
+  const int n = (int)moistureReadingsCount();
+  if (n < 1 || hourSlot < 0)
+    return 0;
+  int slot = -1;
+  int prev = -1;
+  for (int i = 0; i < n; ++i) {
+    int hour = 0;
+    if (!moistureReadingsHourAt((uint16_t)i, &hour))
+      continue;
+    if (hour != prev) {
+      ++slot;
+      prev = hour;
+    }
+    if (slot == hourSlot)
+      return i;
+  }
+  return n - 1;
+}
 
 static void findChartSeries(lv_obj_t *chart, lv_chart_series_t **tempOut,
                             lv_chart_series_t **rhOut) {
@@ -438,23 +558,30 @@ static void onChartXTickLabel(lv_event_t *e) {
       lv_snprintf(dsc->text, dsc->text_length, "%d", dayIndex + 1);
   } else if (obj == ui_chart3) {
     const int n = (int)moistureReadingsCount();
-    if (n < 1) {
+    const int majors = (int)moistureXMajorCnt;
+    const int slots = (int)moistureXSlotCount;
+    if (n < 1 || majors < 1 || v < 0 || v >= majors) {
       dsc->text[0] = '\0';
       return;
     }
-    // 5 majors spaced across the series (see applyMoistureXAxis).
-    int idx = (n <= 1) ? 0 : (v * (n - 1)) / 4;
-    if (idx < 0)
-      idx = 0;
-    if (idx >= n)
-      idx = n - 1;
-    if (moistureReadingsDaySpan() <= 1) {
+    // Major index → unique day/hour slot (see applyMoistureXAxis).
+    const int slot = moistureSlotForMajor(v, majors, slots);
+
+    // Blank if this major maps to the same slot as the previous major.
+    if (v > 0 && moistureSlotForMajor(v - 1, majors, slots) == slot) {
+      dsc->text[0] = '\0';
+      return;
+    }
+
+    if (moistureXHourMode) {
+      const int idx = moistureIndexForHourSlot(slot);
       int hour = 0;
       if (moistureReadingsHourAt((uint16_t)idx, &hour))
         lv_snprintf(dsc->text, dsc->text_length, "%dh", hour);
       else
         dsc->text[0] = '\0';
     } else {
+      const int idx = moistureIndexForDaySlot(slot);
       int mon = 0, day = 0;
       if (moistureReadingsDateAt((uint16_t)idx, &mon, &day))
         lv_snprintf(dsc->text, dsc->text_length, "%dd", day);
@@ -593,18 +720,42 @@ __attribute__((unused)) static void chartUiPump() {
   lvglPump();
 }
 
-static void applyMoistureXAxis(lv_obj_t *chart, uint16_t n) {
+// Returns X major count. Updates moistureX* statics for the tick callback.
+static uint8_t applyMoistureXAxis(lv_obj_t *chart, uint16_t n) {
   if (!chart)
-    return;
+    return 2;
   if (n < 1)
     n = 1;
   if (n > MOISTURE_READINGS_MAX)
     n = MOISTURE_READINGS_MAX;
 
-  // Every hourly point; 5 labeled majors across the series.
+  const uint16_t daySpan = moistureReadingsDaySpan();
+  uint8_t slots;
+  bool hourMode;
+  if (daySpan > 1) {
+    hourMode = false;
+    slots = (daySpan > 255) ? 255 : (uint8_t)daySpan;
+  } else {
+    hourMode = true;
+    slots = countMoistureDistinctHours();
+    if (slots < 1)
+      slots = 1;
+  }
+
+  uint8_t majorCnt = slots;
+  if (majorCnt > kMoistureXMajorMax)
+    majorCnt = kMoistureXMajorMax;
+  if (majorCnt < 2)
+    majorCnt = 2;
+
+  moistureXHourMode = hourMode;
+  moistureXSlotCount = slots;
+  moistureXMajorCnt = majorCnt;
+
   lv_chart_set_point_count(chart, n);
-  lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_X, 5, 3, 5, 2, true, 20);
-  lv_chart_set_div_line_count(chart, 5, 5);
+  lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_X, 5, 3, majorCnt, 2,
+                         true, 20);
+  return majorCnt;
 }
 
 static void updateMoisturePeriodTitle(void) {
@@ -641,19 +792,24 @@ static void paintMoistureChartFromCache(void) {
 
   // Bind large Y buffer before raising point_count (SquareLine stub is 10 pts).
   lv_chart_set_ext_y_array(ui_chart3, chart3Moisture, chartMoisturePct);
-  // Primary Y %: floor(min) / ceil(max) of moisture samples.
+  // Primary Y %: floor(min)/ceil(max), then fit unique integer majors (max 6).
   int16_t yMin = kMoistureAxisFallbackMin;
   int16_t yMax = kMoistureAxisFallbackMax;
   if (!moistureReadingsGetPctAxis(&yMin, &yMax)) {
     yMin = kMoistureAxisFallbackMin;
     yMax = kMoistureAxisFallbackMax;
   }
+  const uint8_t yMajorCnt = fitMoistureYAxis(&yMin, &yMax);
   lv_chart_set_range(ui_chart3, LV_CHART_AXIS_PRIMARY_Y, yMin, yMax);
   // Dense sample series — dots crowd the line; keep markers small.
   lv_obj_set_style_size(ui_chart3, (n > 40) ? 0 : 2, kIndicator);
-  applyMoistureXAxis(ui_chart3, n);
-  lv_chart_set_axis_tick(ui_chart3, LV_CHART_AXIS_PRIMARY_Y, 5, 3, 6, 2, true,
-                         40);
+  const uint8_t xMajorCnt = applyMoistureXAxis(ui_chart3, n);
+  lv_chart_set_axis_tick(ui_chart3, LV_CHART_AXIS_PRIMARY_Y, 5, 3, yMajorCnt, 2,
+                         true, 40);
+  // hdiv ↔ Y majors, vdiv ↔ X majors (LVGL panics if either is 1).
+  const uint8_t hdiv = (yMajorCnt < 2) ? 2 : yMajorCnt;
+  const uint8_t vdiv = (xMajorCnt < 2) ? 2 : xMajorCnt;
+  lv_chart_set_div_line_count(ui_chart3, hdiv, vdiv);
   lv_chart_refresh(ui_chart3);
   updateMoisturePeriodTitle();
 }
@@ -681,10 +837,16 @@ static void setupMoistureChartWidgets(void) {
 
   // Ext buffer first (still at SquareLine's 10-point count), then raise count.
   lv_chart_set_ext_y_array(ui_chart3, chart3Moisture, chartMoisturePct);
-  lv_chart_set_range(ui_chart3, LV_CHART_AXIS_PRIMARY_Y, 0, 100);
-  applyMoistureXAxis(ui_chart3, MOISTURE_READINGS_MAX);
-  lv_chart_set_axis_tick(ui_chart3, LV_CHART_AXIS_PRIMARY_Y, 5, 3, 6, 2, true,
-                         40);
+  int16_t yMin = kMoistureAxisFallbackMin;
+  int16_t yMax = kMoistureAxisFallbackMax;
+  const uint8_t yMajorCnt = fitMoistureYAxis(&yMin, &yMax);
+  lv_chart_set_range(ui_chart3, LV_CHART_AXIS_PRIMARY_Y, yMin, yMax);
+  const uint8_t xMajorCnt = applyMoistureXAxis(ui_chart3, MOISTURE_READINGS_MAX);
+  lv_chart_set_axis_tick(ui_chart3, LV_CHART_AXIS_PRIMARY_Y, 5, 3, yMajorCnt, 2,
+                         true, 40);
+  const uint8_t hdiv = (yMajorCnt < 2) ? 2 : yMajorCnt;
+  const uint8_t vdiv = (xMajorCnt < 2) ? 2 : xMajorCnt;
+  lv_chart_set_div_line_count(ui_chart3, hdiv, vdiv);
 
   static bool moistureTickCbAdded = false;
   if (!moistureTickCbAdded) {
