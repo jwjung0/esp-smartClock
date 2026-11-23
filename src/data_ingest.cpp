@@ -194,7 +194,9 @@ void dataIngestLoop(bool allowRadioOff) {
 bool dataIngestTakeRadioOff(void) {
   if (!deferRadioOff)
     return false;
-  if (marketFetchBusy() && (millis() - deferRadioOffSinceMs) < 30000)
+  // Allow a longer Wi‑Fi window when quotes never arrived (weather+HTTPS).
+  const uint32_t holdMs = marketFetchHasData() ? 30000UL : 90000UL;
+  if (marketFetchBusy() && (millis() - deferRadioOffSinceMs) < holdMs)
     return false;
   deferRadioOff = false;
   return true;

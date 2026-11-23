@@ -827,35 +827,45 @@ static void marketWorker(void * /*arg*/) {
       continue;
     }
     if (WiFi.status() != WL_CONNECTED) {
+      // Keep queued so marketFetchService can kick us when STA returns.
+      fetchQueued = true;
       Serial.println("market fetch: bg skip (no STA)");
       fetchBusy = false;
       continue;
     }
-    // Weather used to run on the UI task (8s HTTP timeout) and froze the clock.
-    weatherFetchOnce();
-    if (!marketVisible) {
-      fetchBusy = false;
-      Serial.println("market fetch: bg skip quotes (hidden)");
-      continue;
-    }
+
+    // Quotes first so boot / short Wi‑Fi windows get indexes before weather.
     while (pendingReady)
       vTaskDelay(pdMS_TO_TICKS(20));
 
     MarketQuote built[MARKET_MAX_QUOTES];
     size_t builtCount = 0;
     setStoreTarget(built, &builtCount);
-    const size_t got = runFetchPass();
+    size_t got = runFetchPass();
+    if (got == 0 && WiFi.status() == WL_CONNECTED) {
+      Serial.println("market fetch: bg all failed; retry once");
+      vTaskDelay(pdMS_TO_TICKS(1500));
+      if (WiFi.status() == WL_CONNECTED) {
+        setStoreTarget(built, &builtCount);
+        got = runFetchPass();
+      }
+    }
     setStoreTarget(quotes, &quoteCount);
-    fetchBusy = false;
 
     if (got == 0) {
       Serial.println("market fetch: bg all failed");
-      continue;
+    } else {
+      memcpy(pendingQuotes, built, sizeof(pendingQuotes));
+      pendingCount = builtCount;
+      pendingReady = true;
+      Serial.printf("market fetch: bg ready (%u quotes)\n", (unsigned)got);
     }
-    memcpy(pendingQuotes, built, sizeof(pendingQuotes));
-    pendingCount = builtCount;
-    pendingReady = true;
-    Serial.printf("market fetch: bg ready (%u quotes)\n", (unsigned)got);
+
+    // Weather used to run on the UI task (8s HTTP timeout) and froze the clock.
+    if (marketVisible && WiFi.status() == WL_CONNECTED)
+      weatherFetchOnce();
+
+    fetchBusy = false;
   }
 }
 
@@ -879,10 +889,10 @@ void marketFetchBegin(void) {
 void marketFetchRequestRefresh(void) {
   if (!marketTaskHandle)
     return;
-  if (WiFi.status() != WL_CONNECTED)
-    return;
+  // Always mark queued; notify only when STA is up (service kicks later).
   fetchQueued = true;
-  xTaskNotifyGive(marketTaskHandle);
+  if (WiFi.status() == WL_CONNECTED)
+    xTaskNotifyGive(marketTaskHandle);
 }
 
 bool marketFetchBusy(void) { return fetchQueued || fetchBusy; }
@@ -897,13 +907,20 @@ bool marketConfigTakeVisibilityChanged(void) {
 }
 
 void marketFetchService(void) {
-  if (!pendingReady)
-    return;
-  memcpy(quotes, pendingQuotes, sizeof(quotes));
-  quoteCount = pendingCount;
-  pendingReady = false;
-  hasData = quoteCount > 0;
-  updatedFlag = hasData;
+  if (pendingReady) {
+    memcpy(quotes, pendingQuotes, sizeof(quotes));
+    quoteCount = pendingCount;
+    pendingReady = false;
+    hasData = quoteCount > 0;
+    updatedFlag = hasData;
+  }
+
+  // Edge: STA just came up with a deferred refresh still queued.
+  static bool wasStaUp = false;
+  const bool staUp = WiFi.status() == WL_CONNECTED;
+  if (staUp && !wasStaUp && fetchQueued && !fetchBusy && marketTaskHandle)
+    xTaskNotifyGive(marketTaskHandle);
+  wasStaUp = staUp;
 }
 
 bool marketFetchHasData(void) { return hasData; }

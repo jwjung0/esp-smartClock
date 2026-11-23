@@ -1624,12 +1624,13 @@ static void closeBootConfigWindow() {
   Serial.println("Boot config window closed (2 min)");
 }
 
-enum class NtpPhase : uint8_t { Idle, Waking, Waiting };
+enum class NtpPhase : uint8_t { Idle, Waking, Waiting, MarketWait };
 
 static NtpPhase ntpPhase = NtpPhase::Idle;
 static uint32_t ntpWaitStartMs = 0;
 static time_t ntpEpochBefore = 0;
 static bool ntpHadTime = false;
+static const uint32_t kNtpMarketWaitMs = 90000;
 
 static bool canIdleLightSleep(void) {
   // Market is static (CLIP) — does not block idle. Chart screens are static.
@@ -1670,6 +1671,19 @@ static void serviceDailyNtp() {
     return;
   }
 
+  if (ntpPhase == NtpPhase::MarketWait) {
+    const bool timedOut = (millis() - ntpWaitStartMs) >= kNtpMarketWaitMs;
+    // Hold radio for quotes (+ weather on same worker) until idle or timeout.
+    if (!timedOut && marketFetchBusy())
+      return;
+    wifiConfigRadioOff();
+    ntpPhase = NtpPhase::Idle;
+    nextNtpSyncMs = millis() + kDailySyncMs;
+    Serial.println("Daily NTP market catch-up done; WiFi off");
+    return;
+  }
+
+  // Waiting
   struct tm nowTm;
   bool done = (millis() - ntpWaitStartMs) >= kNtpWaitMs;
   if (!done && getLocalTime(&nowTm, 0)) {
@@ -1680,6 +1694,15 @@ static void serviceDailyNtp() {
   }
   if (!done)
     return;
+
+  // If quotes never arrived this boot, use the NTP Wi‑Fi window to catch up.
+  if (!marketFetchHasData() && marketConfigIsVisible()) {
+    marketFetchRequestRefresh();
+    ntpWaitStartMs = millis();
+    ntpPhase = NtpPhase::MarketWait;
+    Serial.println("Daily NTP sync done; catching up market…");
+    return;
+  }
 
   wifiConfigRadioOff();
   ntpPhase = NtpPhase::Idle;
