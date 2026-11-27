@@ -29,7 +29,7 @@
 static const uint16_t kScreenW = 240;
 static const uint16_t kScreenH = 320;
 static const uint32_t kNtpWaitMs = 15000;
-static const uint32_t kBootConfigMs = 2UL * 60UL * 1000UL; // portal window
+static const uint32_t kBootConfigMs = 1UL * 60UL * 1000UL; // portal window
 static const uint32_t kDailySyncMs = 24UL * 60UL * 60UL * 1000UL;
 static const uint32_t kClimateUiMs = 5000; // refresh ui_temp / ui_humid
 static const uint32_t kLuxBlMs = 3000; // scan frequency for ambient sensor (VEML7700)
@@ -71,6 +71,11 @@ static uint32_t nextNtpSyncMs = 0;
 static uint32_t nextClimateUiMs = 0;
 static uint32_t nextLuxBlMs = 0;
 static uint32_t nextMarketPageMs = 0;
+static const uint32_t kMoistureBannerMs = 2UL * 60UL * 1000UL; // show 2 min per fetch
+static uint32_t moistureBannerUntilMs = 0;
+static bool moistureBannerInWarn = false;
+static bool moistureBannerDismissed = false;
+static int moistureBannerBlinkPhase = -1; // -1 unset; 0 off; 1 on
 static size_t marketPageIndex = 0;
 static bool bootConfigOpen = false;
 static int loadingCreepCeiling = 0;
@@ -86,6 +91,7 @@ static void showHome();
 static void showChart();
 static void showMoistureChart();
 static void updateMoistureBannerUi();
+static bool serviceMoistureBannerBlink();
 static uint8_t fitMoistureYAxis(int16_t *yMin, int16_t *yMax);
 static uint8_t countMoistureDistinctHours(void);
 static int moistureIndexForDaySlot(int daySlot);
@@ -858,33 +864,111 @@ static void setupMoistureChartWidgets(void) {
   moistureChartSeriesBound = true;
 }
 
+static void hideMoistureBannerWidgets(void) {
+  if (ui_banner)
+    lv_obj_add_flag(ui_banner, LV_OBJ_FLAG_HIDDEN);
+  if (ui_moisture_label)
+    lv_obj_add_flag(ui_moisture_label, LV_OBJ_FLAG_HIDDEN);
+  if (ui_moisture)
+    lv_obj_add_flag(ui_moisture, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void showMoistureBannerWidgets(void) {
+  if (ui_banner)
+    lv_obj_clear_flag(ui_banner, LV_OBJ_FLAG_HIDDEN);
+  if (ui_moisture_label)
+    lv_obj_clear_flag(ui_moisture_label, LV_OBJ_FLAG_HIDDEN);
+  if (ui_moisture)
+    lv_obj_clear_flag(ui_moisture, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void clearMoistureBannerEpisode(void) {
+  moistureBannerInWarn = false;
+  moistureBannerDismissed = false;
+  moistureBannerUntilMs = 0;
+  moistureBannerBlinkPhase = -1;
+}
+
 static void updateMoistureBannerUi(void) {
   if (!ui_banner || !ui_moisture_label || !ui_moisture)
     return;
 
   float pct = NAN;
   if (!moistureReadingsLatestPct(&pct)) {
-    lv_obj_add_flag(ui_banner, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(ui_moisture_label, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(ui_moisture, LV_OBJ_FLAG_HIDDEN);
+    hideMoistureBannerWidgets();
+    clearMoistureBannerEpisode();
     return;
   }
 
-  if (pct > 40.0f) {
-    lv_obj_add_flag(ui_banner, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(ui_moisture_label, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(ui_moisture, LV_OBJ_FLAG_HIDDEN);
+  const float warnAt = (float)moistureConfigWarnPct();
+  const float critAt = (float)moistureConfigCritPct();
+  if (pct > warnAt) {
+    hideMoistureBannerWidgets();
+    clearMoistureBannerEpisode();
     return;
   }
 
-  const uint32_t bg = (pct <= 20.0f) ? 0x942C00u : 0x947300u;
+  // Fresh warn episode: blink for 2 min, then hide until the next moisture
+  // server fetch (ingest wake) while still ≤ warn.
+  if (!moistureBannerInWarn) {
+    moistureBannerInWarn = true;
+    moistureBannerDismissed = false;
+    moistureBannerUntilMs = millis() + kMoistureBannerMs;
+    moistureBannerBlinkPhase = -1;
+  }
+
+  if (!moistureBannerDismissed &&
+      (int32_t)(millis() - moistureBannerUntilMs) >= 0) {
+    moistureBannerDismissed = true;
+    hideMoistureBannerWidgets();
+    return;
+  }
+
+  if (moistureBannerDismissed) {
+    hideMoistureBannerWidgets();
+    return;
+  }
+
+  const uint32_t bg = (pct <= critAt) ? 0xB33A3Au : 0xD66A6Au;
   lv_obj_set_style_bg_color(ui_banner, lv_color_hex(bg), kMain);
   char buf[16];
   snprintf(buf, sizeof(buf), "%d%%", (int)lroundf(pct));
   lv_label_set_text(ui_moisture, buf);
-  lv_obj_clear_flag(ui_banner, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_clear_flag(ui_moisture_label, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_clear_flag(ui_moisture, LV_OBJ_FLAG_HIDDEN);
+
+  // Visible on the "on" half of each second (same cadence as colon).
+  struct timeval tv;
+  gettimeofday(&tv, nullptr);
+  const bool on = tv.tv_usec < 500000L;
+  moistureBannerBlinkPhase = on ? 1 : 0;
+  if (on)
+    showMoistureBannerWidgets();
+  else
+    hideMoistureBannerWidgets();
+}
+
+// Returns true when banner visibility changed (needs LVGL flush).
+static bool serviceMoistureBannerBlink(void) {
+  if (!onHomeScreen || !moistureBannerInWarn || moistureBannerDismissed)
+    return false;
+
+  if ((int32_t)(millis() - moistureBannerUntilMs) >= 0) {
+    moistureBannerDismissed = true;
+    hideMoistureBannerWidgets();
+    moistureBannerBlinkPhase = 0;
+    return true;
+  }
+
+  struct timeval tv;
+  gettimeofday(&tv, nullptr);
+  const bool on = tv.tv_usec < 500000L;
+  if ((int)on == moistureBannerBlinkPhase)
+    return false;
+  moistureBannerBlinkPhase = on ? 1 : 0;
+  if (on)
+    showMoistureBannerWidgets();
+  else
+    hideMoistureBannerWidgets();
+  return true;
 }
 
 static void showChart() {
@@ -1540,10 +1624,12 @@ static void homeUiPump() {
     struct tm localTm;
     if (timeSyncTick(&localTm)) {
       paintTime(localTm);
+      (void)serviceMoistureBannerBlink();
       lv_timer_handler();
       lv_refr_now(NULL);
     } else {
       blinkColon(); // mid-second OFF; lvglPump flushes below
+      (void)serviceMoistureBannerBlink();
     }
   }
   lvglPump();
@@ -1621,7 +1707,7 @@ static void closeBootConfigWindow() {
   bootConfigOpen = false;
   wifiConfigRadioOff();
   updateWifiIcon();
-  Serial.println("Boot config window closed (2 min)");
+  Serial.println("Boot config window closed (1 min)");
 }
 
 enum class NtpPhase : uint8_t { Idle, Waking, Waiting, MarketWait };
@@ -1793,7 +1879,7 @@ void clockAppSetup() {
   bootConfigUntilMs = millis() + kBootConfigMs;
   nextNtpSyncMs = millis() + kDailySyncMs;
   if (bootConfigOpen)
-    Serial.println("Boot config window: 2 min (then WiFi off)");
+    Serial.println("Boot config window: 1 min (then WiFi off)");
 
   bmeSensorBegin();
   lightSensorBegin();
@@ -1867,6 +1953,8 @@ void clockAppLoop() {
       // Mid-second OFF (~0.5 s) — flush without waiting for next SS tick.
       uiDirty = true;
     }
+    if (serviceMoistureBannerBlink())
+      uiDirty = true;
     // Climate every 5 s — AHT20 needs ~80 ms; Request/Take avoid delay().
     if ((int32_t)(millis() - nextClimateUiMs) >= 0) {
       bmeSensorRequest();
@@ -1935,7 +2023,17 @@ void clockAppLoop() {
     paintChartFromCache();
     lv_timer_handler();
   }
+  if (moistureConfigTakeChanged()) {
+    // Restart warn episode so new thresholds show immediately.
+    clearMoistureBannerEpisode();
+    if (onHomeScreen) {
+      updateMoistureBannerUi();
+      lv_timer_handler();
+    }
+  }
   if (moistureReadingsTakeUpdated()) {
+    // New server sample → restart 1 min blink if still in warn.
+    clearMoistureBannerEpisode();
     if (onHomeScreen)
       updateMoistureBannerUi();
     if (onMoistureChartScreen)

@@ -87,7 +87,7 @@ Reference unit prices for one build (esp32dev setup).
 | Daylight BL, Wi‑Fi off        |    ~70 mA |
 | Normal run (radio mostly off) | ~70–75 mA |
 
-Typical duty: portal **2 min** after boot, then Wi‑Fi off; brief wakes every **30 min** (+ daily NTP) — average stays near the Wi‑Fi-off figure.
+Typical duty: portal **1 min** after boot, then Wi‑Fi off; brief wakes every **30 min** (+ daily NTP) — average stays near the Wi‑Fi-off figure.
 
 **1000 mAh LiPo** (via TP4056 + boost 5 V → VIN): cell draw ≈ **1.5×** USB mA → ~**7–10 h** day BL / Wi‑Fi off; ~**12–16 h** night dim; ~**3 h** if Wi‑Fi stays on. Pack alone is a buffer, not full day+night at day brightness.
 
@@ -104,7 +104,7 @@ Typical duty: portal **2 min** after boot, then Wi‑Fi off; brief wakes every *
 - TTP223 touch toggles home ↔ climate chart (daily/monthly)
 - Wi‑Fi provisioning via local HTTP portal (SoftAP + STA)
 - NTP time sync in **KST (UTC+9)** → live `ui_time` / `ui_date`
-- Power policy: **2 min** config window after boot, then Wi‑Fi off; **daily** NTP resync; **every 30 min** climate data ingest (brief Wi‑Fi wake → POST → Naver weather + OpenWeather GET → Naver market GET → off). With radio off: CPU **40 MHz**, home loop idles until the next **1 Hz** colon/time tick (light sleep when BL is off or auto-BL is off; timed wait when auto-BL PWM must stay running). Radio on → CPU **240 MHz**. Indoor auto-BL uses portal night/day % (dim only, no night blank).
+- Power policy: **1 min** config window after boot, then Wi‑Fi off; **daily** NTP resync; **every 30 min** climate data ingest (brief Wi‑Fi wake → POST → Naver weather + OpenWeather GET → Naver market GET → off). With radio off: CPU **40 MHz**, home loop idles until the next **1 Hz** colon/time tick (light sleep when BL is off or auto-BL is off; timed wait when auto-BL PWM must stay running). Radio on → CPU **240 MHz**. Indoor auto-BL uses portal night/day % (dim only, no night blank).
 - Climate ingest deploy targets: **local** (this Mac) vs **prod** (Ubuntu) via gitignored `include/ingest_config_*.h`
 - Live indoor T/RH from BME280 on `ui_temp*` / `ui_humid`
 - Ambient lux from VEML7700 → auto LCD backlight brightness (PWM; no ingest). Indoor log curve (~20–450 lux) maps to portal **Night %** / **Day %** (defaults 20 / 80; NVS `clockui` / `bl_night` / `bl_day`) so Day **100%** reaches full PWM in normal room light. Config portal **Backlight** switch turns auto on/off (off = full brightness; NVS `bl_auto`). **Weather** source stored in NVS `clockui` / `wx_src` (`naver` | `openweather`)
@@ -143,7 +143,7 @@ Typical duty: portal **2 min** after boot, then Wi‑Fi off; brief wakes every *
 4. Pick a network from the scan list (or type SSID), enter the password, tap **Connect**.
 5. After join, open **http://smartclock.local/** on the same Wi‑Fi (mDNS). Fallback: LAN IP from Serial.
 6. SoftAP setup stays **http://192.168.4.1/**.
-7. Portal stays up for **2 minutes after boot**, then Wi‑Fi turns off. Power-cycle for another config window.
+7. Portal stays up for **1 minute after boot**, then Wi‑Fi turns off. Power-cycle for another config window.
 8. NTP resyncs about **once per day** (brief Wi‑Fi wake, then off again). Time zone: **KST**.
 9. After the config window, climate readings POST about **every 30 minutes** (Wi‑Fi on → POST → Naver weather + OpenWeather GET → Naver market GET → off). Set URL/token in gitignored `include/ingest_config_local.h` / `include/ingest_config_prod.h`.
 10. Same wake fetches outdoor weather (Naver KMA preferred, OpenWeather fallback) and market quotes (Naver). Set keys/region in gitignored `include/weather_config.h`.

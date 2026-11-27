@@ -4,6 +4,7 @@
 
 #include "bl_ctrl.h"
 #include "market_fetch.h"
+#include "moisture_readings_fetch.h"
 #include "power_policy.h"
 #include "weather_fetch.h"
 
@@ -185,26 +186,41 @@ static bool connectSta(const String &ssid, const String &pass) {
   return false;
 }
 
-static void startSoftAp();
+static void startSoftAp(bool force = false);
 static void stopSoftAp();
 static void setupHttpRoutes();
 static void ensureHttp();
 
-static void startSoftAp() {
-  if (softApActive)
+static void startSoftAp(bool force) {
+  if (softApActive && !force)
     return;
+
+  if (softApActive) {
+    dnsServer.stop();
+    WiFi.softAPdisconnect(true);
+    softApActive = false;
+    delay(50);
+  }
 
   apSsid = kApSsid;
   WiFi.mode(WIFI_AP_STA);
   WiFi.softAPConfig(kApIp, kApIp, IPAddress(255, 255, 255, 0));
-  // Open network, channel 1 — phones often miss hidden/odd-channel APs.
-  if (!WiFi.softAP(kApSsid, nullptr, 1, 0, 4)) {
+  // Follow STA channel when joined — SoftAP cannot stay on ch1 in AP_STA.
+  // After WiFi.begin(), SoftAP beacons often die; callers force-restart.
+  int ch = 1;
+  if (WiFi.status() == WL_CONNECTED) {
+    ch = WiFi.channel();
+    if (ch < 1 || ch > 13)
+      ch = 1;
+  }
+  // Open network — phones often miss hidden APs.
+  if (!WiFi.softAP(kApSsid, nullptr, ch, 0, 4)) {
     Serial.println("WiFi SoftAP start FAILED");
     return;
   }
   dnsServer.start(kDnsPort, "*", kApIp);
   softApActive = true;
-  Serial.printf("WiFi SoftAP \"%s\"  http://%s/\n", kApSsid,
+  Serial.printf("WiFi SoftAP \"%s\" ch=%d  http://%s/\n", kApSsid, ch,
                 WiFi.softAPIP().toString().c_str());
 }
 
@@ -381,6 +397,8 @@ static void handleRoot() {
   const uint8_t blNightPct = blCtrlNightPct();
   const uint8_t blDayPct = blCtrlDayPct();
   const bool wxPreferNaver = weatherConfigPreferNaver();
+  const uint8_t moistWarnPct = moistureConfigWarnPct();
+  const uint8_t moistCritPct = moistureConfigCritPct();
 
   html += F("<section class=box>"
             "<div class=box-head>"
@@ -426,6 +444,26 @@ static void handleRoot() {
     html += F(" checked");
   html += F("> OpenWeather</label></div>"
             "<p class=msg id=wx_msg style=\"display:none\"></p>"
+            "</section>");
+
+  html += F("<section class=box>"
+            "<div class=box-head>"
+            "<h1>Soil Moisture</h1>"
+            "</div>"
+            "<p class=hint>Home banner when moisture is at or below Warn %. "
+            "Critical % uses the darker banner color (must be ≤ Warn).</p>"
+            "<div class=mkt-add style=\"grid-template-columns:1fr 1fr\">"
+            "<div><label for=moist_warn>Warn below %</label>"
+            "<input type=number id=moist_warn min=1 max=100 step=1 value=\"");
+  html += String((unsigned)moistWarnPct);
+  html += F("\"></div>"
+            "<div><label for=moist_crit>Critical below %</label>"
+            "<input type=number id=moist_crit min=1 max=100 step=1 value=\"");
+  html += String((unsigned)moistCritPct);
+  html += F("\"></div>"
+            "</div>"
+            "<button type=button id=moist_save>Save</button>"
+            "<p class=msg id=moist_msg style=\"display:none\"></p>"
             "</section>");
 
   html += F("<section class=box>"
@@ -668,6 +706,31 @@ static void handleRoot() {
             "if(document.getElementById('wx_naver').checked)wxPost('naver');});"
             "document.getElementById('wx_ow').addEventListener('change',()=>{"
             "if(document.getElementById('wx_ow').checked)wxPost('openweather');});"
+            "function moistMsg(t,ok){"
+            "const m=document.getElementById('moist_msg');"
+            "m.style.display='block';m.style.color=ok?'#7d7':'#effa5c';m.textContent=t;}"
+            "function moistClamp(){"
+            "let w=parseInt(document.getElementById('moist_warn').value,10);"
+            "let c=parseInt(document.getElementById('moist_crit').value,10);"
+            "if(!Number.isFinite(w))w=40;if(!Number.isFinite(c))c=20;"
+            "w=Math.min(100,Math.max(1,w));c=Math.min(100,Math.max(1,c));"
+            "if(c>w)c=w;"
+            "document.getElementById('moist_warn').value=String(w);"
+            "document.getElementById('moist_crit').value=String(c);"
+            "return{w:w,c:c};}"
+            "document.getElementById('moist_save').addEventListener('click',()=>{"
+            "const v=moistClamp();"
+            "fetch('/moisture',{method:'POST',headers:{'Content-Type':"
+            "'application/x-www-form-urlencoded'},"
+            "body:'warn='+v.w+'&crit='+v.c})"
+            ".then(r=>r.json()).then(j=>{"
+            "if(j&&j.ok){"
+            "if(j.warn!=null)document.getElementById('moist_warn').value=String(j.warn);"
+            "if(j.crit!=null)document.getElementById('moist_crit').value=String(j.crit);"
+            "moistMsg('Warn ≤'+document.getElementById('moist_warn').value+"
+            "'% · Critical ≤'+document.getElementById('moist_crit').value+'%',true);}"
+            "else{moistMsg('Save failed',false);}})"
+            ".catch(()=>moistMsg('Save failed',false));});"
             "</script></body></html>");
 
   server.send(200, "text/html", html);
@@ -826,6 +889,33 @@ static void handleWeather() {
   server.send(200, "application/json", "{\"ok\":true}");
 }
 
+static void handleMoisture() {
+  const String warnArg = server.arg("warn");
+  const String critArg = server.arg("crit");
+  if (!warnArg.length() || !critArg.length()) {
+    server.send(400, "application/json", "{\"ok\":false}");
+    return;
+  }
+
+  const int warn = warnArg.toInt();
+  const int crit = critArg.toInt();
+  if (warn < 1 || warn > 100 || crit < 1 || crit > 100) {
+    server.send(400, "application/json", "{\"ok\":false}");
+    return;
+  }
+
+  if (!moistureConfigSetWarnCritPct((uint8_t)warn, (uint8_t)crit)) {
+    server.send(500, "application/json", "{\"ok\":false}");
+    return;
+  }
+
+  char buf[64];
+  snprintf(buf, sizeof(buf), "{\"ok\":true,\"warn\":%u,\"crit\":%u}",
+           (unsigned)moistureConfigWarnPct(),
+           (unsigned)moistureConfigCritPct());
+  server.send(200, "application/json", buf);
+}
+
 static void handleMarketGet() {
   String json;
   if (!marketConfigGetJson(json))
@@ -864,6 +954,7 @@ static void setupHttpRoutes() {
   server.on("/colors", HTTP_POST, handleColors);
   server.on("/backlight", HTTP_POST, handleBacklight);
   server.on("/weather", HTTP_POST, handleWeather);
+  server.on("/moisture", HTTP_POST, handleMoisture);
   server.on("/market", HTTP_GET, handleMarketGet);
   server.on("/market", HTTP_POST, handleMarketPost);
   // Captive portal probes
@@ -996,6 +1087,9 @@ void wifiConfigBegin() {
     Serial.printf("Config portal: http://%s/  or  http://%s.local/\n",
                   WiFi.localIP().toString().c_str(), kMdnsHost);
   }
+  // STA scan/join often kills SoftAP beacons while softApActive stays true.
+  // Force-restart on the live STA channel so phones can discover it again.
+  startSoftAp(true);
 
   if (softApActive)
     Serial.printf("Join SoftAP \"%s\" → http://%s/\n", kApSsid,

@@ -4,6 +4,7 @@
 
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
+#include <Preferences.h>
 #include <WiFi.h>
 #include <math.h>
 #include <stdio.h>
@@ -42,6 +43,87 @@ static uint8_t sampleDay[MOISTURE_READINGS_MAX];
 static uint8_t sampleHour[MOISTURE_READINGS_MAX];
 static float sampleMin = NAN;
 static float sampleMax = NAN;
+
+static const char *kPrefsUiNs = "clockui";
+static const char *kKeyWarn = "moist_warn";
+static const char *kKeyCrit = "moist_crit";
+static const uint8_t kWarnDefault = 40;
+static const uint8_t kCritDefault = 20;
+static uint8_t warnPct = kWarnDefault;
+static uint8_t critPct = kCritDefault;
+static bool prefsLoaded = false;
+static volatile bool warnChangedFlag = false;
+
+static void clampWarnCrit(uint8_t *warnInOut, uint8_t *critInOut) {
+  if (!warnInOut || !critInOut)
+    return;
+  uint8_t w = *warnInOut;
+  uint8_t c = *critInOut;
+  if (w < 1)
+    w = 1;
+  if (w > 100)
+    w = 100;
+  if (c < 1)
+    c = 1;
+  if (c > 100)
+    c = 100;
+  if (c > w)
+    c = w;
+  *warnInOut = w;
+  *critInOut = c;
+}
+
+void moistureConfigLoadPrefs(void) {
+  Preferences prefs;
+  warnPct = kWarnDefault;
+  critPct = kCritDefault;
+  if (prefs.begin(kPrefsUiNs, true)) {
+    warnPct = (uint8_t)prefs.getUChar(kKeyWarn, kWarnDefault);
+    critPct = (uint8_t)prefs.getUChar(kKeyCrit, kCritDefault);
+    prefs.end();
+  }
+  clampWarnCrit(&warnPct, &critPct);
+  prefsLoaded = true;
+}
+
+static void ensureWarnPrefs(void) {
+  if (!prefsLoaded)
+    moistureConfigLoadPrefs();
+}
+
+uint8_t moistureConfigWarnPct(void) {
+  ensureWarnPrefs();
+  return warnPct;
+}
+
+uint8_t moistureConfigCritPct(void) {
+  ensureWarnPrefs();
+  return critPct;
+}
+
+bool moistureConfigSetWarnCritPct(uint8_t warnIn, uint8_t critIn) {
+  clampWarnCrit(&warnIn, &critIn);
+  Preferences prefs;
+  if (!prefs.begin(kPrefsUiNs, false))
+    return false;
+  prefs.putUChar(kKeyWarn, warnIn);
+  prefs.putUChar(kKeyCrit, critIn);
+  prefs.end();
+  warnPct = warnIn;
+  critPct = critIn;
+  prefsLoaded = true;
+  warnChangedFlag = true;
+  Serial.printf("moisture warn=%u%% crit=%u%%\n", (unsigned)warnPct,
+                (unsigned)critPct);
+  return true;
+}
+
+bool moistureConfigTakeChanged(void) {
+  if (!warnChangedFlag)
+    return false;
+  warnChangedFlag = false;
+  return true;
+}
 
 static void clearSeries(void) {
   for (size_t i = 0; i < MOISTURE_READINGS_MAX; ++i) {
@@ -136,6 +218,7 @@ void moistureReadingsFetchBegin(void) {
   clearSeries();
   hasData = false;
   updatedFlag = false;
+  moistureConfigLoadPrefs();
   Serial.println("moisture readings: ready");
 }
 
@@ -355,5 +438,10 @@ bool moistureReadingsHourAt(uint16_t, int *) { return false; }
 bool moistureReadingsLatestPct(float *) { return false; }
 bool moistureReadingsCopySeries(int16_t *, size_t, uint16_t *) { return false; }
 bool moistureReadingsGetPctAxis(int16_t *, int16_t *) { return false; }
+void moistureConfigLoadPrefs(void) {}
+uint8_t moistureConfigWarnPct(void) { return 40; }
+uint8_t moistureConfigCritPct(void) { return 20; }
+bool moistureConfigSetWarnCritPct(uint8_t, uint8_t) { return false; }
+bool moistureConfigTakeChanged(void) { return false; }
 
 #endif

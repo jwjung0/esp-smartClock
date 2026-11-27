@@ -42,6 +42,16 @@ bool moistureReadingsCopySeries(int16_t *pctOut, size_t n, uint16_t *countOut);
 // Primary Y: floor(min) / ceil(max) of valid hourly m values.
 bool moistureReadingsGetPctAxis(int16_t *yminOut, int16_t *ymaxOut);
 
+// Home banner thresholds (NVS clockui). Defaults warn=40, crit=20.
+// Show banner when moisture ≤ warn; darker color when ≤ crit.
+void moistureConfigLoadPrefs(void);
+uint8_t moistureConfigWarnPct(void);
+uint8_t moistureConfigCritPct(void);
+// Clamped 1–100; crit forced ≤ warn. Persists NVS. Returns true on save.
+bool moistureConfigSetWarnCritPct(uint8_t warnPct, uint8_t critPct);
+// True once after a successful portal save (apply on LVGL/home loop).
+bool moistureConfigTakeChanged(void);
+
 #if defined(__cplusplus)
 }
 #endif
