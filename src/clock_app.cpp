@@ -870,7 +870,7 @@ static void updateMoistureBannerUi(void) {
     return;
   }
 
-  if (pct > 30.0f) {
+  if (pct > 40.0f) {
     lv_obj_add_flag(ui_banner, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(ui_moisture_label, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(ui_moisture, LV_OBJ_FLAG_HIDDEN);

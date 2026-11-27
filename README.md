@@ -75,10 +75,23 @@ Reference unit prices for one build (esp32dev setup).
 | Temp / humidity | BME280 or BMP280 + AHT20 |      1,750 |
 | Ambient light   | VEML7700                 |      2,250 |
 | Case            | Enclosure                |      3,500 |
-| Battery         | 1000 mAh                 |      4,300 |
 | Power           | TP4056 + DC-DC 5V        |        900 |
 | Touch           | TTP223                   |        400 |
-| **Total**       |                          | **25,900** |
+| **Total**       |                          | **21,600** |
+
+### Power (measured @ USB 5 V)
+
+| Mode                          |   Current |
+| ----------------------------- | --------: |
+| Daylight BL, Wi‑Fi on         |   ~220 mA |
+| Daylight BL, Wi‑Fi off        |    ~70 mA |
+| Normal run (radio mostly off) | ~70–75 mA |
+
+Typical duty: portal **2 min** after boot, then Wi‑Fi off; brief wakes every **30 min** (+ daily NTP) — average stays near the Wi‑Fi-off figure.
+
+**1000 mAh LiPo** (via TP4056 + boost 5 V → VIN): cell draw ≈ **1.5×** USB mA → ~**7–10 h** day BL / Wi‑Fi off; ~**12–16 h** night dim; ~**3 h** if Wi‑Fi stays on. Pack alone is a buffer, not full day+night at day brightness.
+
+**Solar (TP4056, ≥5 V panel):** break-even while sun is up ≳ **150 mA** into the charger; to recover overnight in ~5 peak hours ≳ **500–700 mA** avg in those hours (or ~**1–2 W** 5–6 V panel with margin).
 
 ## Features
 
